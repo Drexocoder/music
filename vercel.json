@@ -18,12 +18,18 @@
 
   "rewrites": [
     {
+      "source": "/health",
+      "destination": {
+        "service": "downloader",
+        "path": "/health"
+      }
+    },
+    {
       "source": "/api/download/:path*",
       "destination": {
         "service": "downloader"
       }
     },
-
     {
       "source": "/(.*)",
       "destination": {
