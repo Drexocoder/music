@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { createHash, timingSafeEqual } from "crypto";
+import { timingSafeEqual } from "crypto";
 import { OWNER_TELEGRAM_ID, PLANS, SUPPORT_HANDLE, planById } from "@/lib/plans";
 import { FILE as YOUTUBE_GUIDE } from "@/lib/guide-youtube-py";
 import { publicOrigin, telegramRequest, telegramWebhookSecret } from "@/lib/telegram.server";
@@ -53,7 +53,7 @@ function plansText(): string {
   ].join("\n");
 }
 
-function mainKeyboard(origin: string) {
+function mainKeyboard() {
   return {
     inline_keyboard: [
       [
@@ -65,8 +65,8 @@ function mainKeyboard(origin: string) {
         { text: "📊 My usage", callback_data: "usage" },
       ],
       [
-        { text: "🛒 Buy a plan", url: `https://t.me/${SUPPORT_HANDLE.replace("@", "")}` },
-        { text: "📚 Docs", url: `${origin}/developers` },
+        { text: "🛒 Buy a plan", callback_data: "buy" },
+        { text: "❓ Help", callback_data: "help" },
       ],
     ],
   };
@@ -75,7 +75,7 @@ function mainKeyboard(origin: string) {
 function plansKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: `🛒 Buy — contact ${SUPPORT_HANDLE}`, url: `https://t.me/${SUPPORT_HANDLE.replace("@", "")}` }],
+      [{ text: "🛒 How to buy", callback_data: "buy" }],
       [{ text: "🔑 Get free key", callback_data: "key" }],
     ],
   };
@@ -168,8 +168,7 @@ async function handleUpdate(update: Update, origin: string) {
 
 
   if (cmd === "/start" || cmd === "/help" || cmd === "/menu") {
-    // sendMessage is much faster than sendPhoto — banner shipped as link preview.
-    await say(HELP, mainKeyboard(origin));
+    await say(HELP, mainKeyboard());
     return;
   }
 
@@ -196,8 +195,6 @@ async function handleUpdate(update: Update, origin: string) {
         "1. <code>pip install aiohttp</code>",
         "2. Put your key in <code>NEX_API_KEY</code> (or edit the file).",
         "3. <code>from youtube import search, download_song, download_video</code>",
-        "",
-        `Full docs: ${origin}/developers`,
       ].join("\n"),
     );
     guide.append("parse_mode", "HTML");
@@ -267,9 +264,8 @@ async function handleUpdate(update: Update, origin: string) {
         `Valid until: <b>${new Date(key.expires_at).toDateString()}</b>`,
         "",
         `Need more? Send /plans.`,
-        `Docs: ${origin}/developers`,
       ].join("\n"),
-      mainKeyboard(origin),
+      mainKeyboard(),
     );
     return;
   }
@@ -345,7 +341,7 @@ async function handleUpdate(update: Update, origin: string) {
     cmd === "/song" || cmd === "/play" || wantsVideo ? arg : text.startsWith("/") ? "" : text;
 
   if (!query) {
-    await say(HELP, mainKeyboard(origin));
+    await say(HELP, mainKeyboard());
     return;
   }
 
@@ -364,7 +360,7 @@ async function handleUpdate(update: Update, origin: string) {
   ]);
 
   if (!key) {
-    await say("You need a key first. Send /key to generate your free one.", mainKeyboard(origin));
+    await say("You need a key first. Send /key to generate your free one.", mainKeyboard());
     return;
   }
   if (!resolved.id) {
@@ -378,17 +374,8 @@ async function handleUpdate(update: Update, origin: string) {
       [
         `🎵 <b>${title}</b>`,
         "",
-        "Downloads are unavailable on this deployment, so here is the track to play:",
-        `${origin}/?v=${videoId}`,
+        "Downloads are unavailable on this deployment. Please try again later.",
       ].join("\n"),
-      {
-        inline_keyboard: [
-          [
-            { text: "▶️ Play in Aurora", url: `${origin}/?v=${videoId}` },
-            { text: "YouTube", url: `https://youtu.be/${videoId}` },
-          ],
-        ],
-      },
     );
     return;
   }
@@ -403,13 +390,7 @@ async function handleUpdate(update: Update, origin: string) {
     : await tg("sendAudio", { chat_id: chatId, audio: fileUrl, title, caption: title });
 
   if (!res.ok) {
-    await say(
-      [
-        "😕 Couldn't send that file — it may be larger than Telegram's 20 MB link limit.",
-        "",
-        `Play it here instead: ${origin}/?v=${videoId}`,
-      ].join("\n"),
-    );
+    await say("😕 Couldn't send that file. It may be larger than Telegram's file limit; try another result.");
   }
 }
 

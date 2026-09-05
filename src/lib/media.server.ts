@@ -304,7 +304,7 @@ async function fetchLocalMedia(videoId: string, type: "audio" | "video"): Promis
     stream.once("close", cleanup);
     stream.once("error", cleanup);
 
-    return new Response(Readable.toWeb(stream) as ReadableStream, {
+    return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
       headers: {
         "content-type": type === "audio" ? "audio/mpeg" : "video/mp4",
         "content-length": String(fileStat.size),
