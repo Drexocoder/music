@@ -431,7 +431,18 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
 
         // Await the handler: Vercel may freeze a function as soon as a response
         // is returned, so fire-and-forget work is not reliable there.
-        await handleUpdate(update, origin);
+        try {
+          await handleUpdate(update, origin);
+        } catch (error) {
+          console.error("[telegram update]", error);
+          const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
+          if (chatId) {
+            await tg("sendMessage", {
+              chat_id: chatId,
+              text: "⚠️ The bot is temporarily unable to access key storage. Please try again shortly.",
+            }).catch((sendError) => console.error("[telegram error reply]", sendError));
+          }
+        }
         return Response.json({ ok: true });
       },
     },

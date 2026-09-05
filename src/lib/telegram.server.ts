@@ -64,6 +64,7 @@ export async function logMessage(entry: LogEntry) {
   try {
     const { mongoCollection } = await import("@/lib/mongodb.server");
     await (await mongoCollection("telegram_messages")).insertOne({
+      record_type: "telegram_message",
       chat_id: entry.chat_id,
       direction: entry.direction,
       text: entry.text ?? null,

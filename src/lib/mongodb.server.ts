@@ -3,6 +3,7 @@ import { PLANS, planById } from "@/lib/plans";
 
 export type ApiKeyDocument = {
   _id: ObjectId;
+  record_type?: "api_key";
   key: string;
   telegram_id: number;
   plan: string;
@@ -16,6 +17,7 @@ export type ApiKeyDocument = {
 
 export type BotUserDocument = {
   _id?: ObjectId;
+  record_type?: "bot_user";
   telegram_id: number;
   username: string | null;
   first_name: string | null;
@@ -25,6 +27,7 @@ export type BotUserDocument = {
 
 export type ApiUsageDocument = {
   _id?: ObjectId;
+  record_type?: "usage";
   key_id: ObjectId;
   day: string;
   count: number;
@@ -34,6 +37,7 @@ export type ApiUsageDocument = {
 
 export type TelegramMessageDocument = {
   _id?: ObjectId;
+  record_type?: "telegram_message";
   update_id?: number;
   chat_id: number;
   telegram_user_id?: number | null;
@@ -85,7 +89,8 @@ export async function mongoDb() {
 }
 
 export async function mongoCollection<T extends Document>(name: string): Promise<Collection<T>> {
-  return (await mongoDb()).collection<T>(name);
+  const storageName = process.env["MONGODB_COLLECTION"]?.trim() || "aurora_records";
+  return (await mongoDb()).collection<T>(storageName);
 }
 
 export function dayKey(date: Date): string {
@@ -119,7 +124,7 @@ export type MongoKeyRow = ReturnType<typeof keyRow>;
 
 export async function findApiKey(value: string): Promise<ApiKeyDocument | null> {
   const collection = await mongoCollection<ApiKeyDocument>("api_keys");
-  return collection.findOne({ key: value });
+  return collection.findOne({ record_type: "api_key", key: value });
 }
 
 export function addDays(date: Date, days: number): Date {

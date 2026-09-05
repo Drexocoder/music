@@ -47,7 +47,7 @@ export const listChats = createServerFn({ method: "POST" })
     check(data.passcode);
     const { mongoCollection } = await import("@/lib/mongodb.server");
     const rows = await (await mongoCollection<TelegramMessageDocument>("telegram_messages"))
-      .find({})
+      .find({ record_type: "telegram_message" })
       .sort({ created_at: -1 })
       .limit(400)
       .toArray();
@@ -81,7 +81,7 @@ export const listMessages = createServerFn({ method: "POST" })
     check(data.passcode);
     const { mongoCollection } = await import("@/lib/mongodb.server");
     const rows = await (await mongoCollection<TelegramMessageDocument>("telegram_messages"))
-      .find({ chat_id: data.chatId })
+      .find({ record_type: "telegram_message", chat_id: data.chatId })
       .sort({ created_at: -1 })
       .limit(100)
       .toArray();
@@ -124,7 +124,10 @@ export const broadcast = createServerFn({ method: "POST" })
     check(data.passcode);
     const { tgCall, logMessage } = await import("./telegram.server");
     const { mongoCollection } = await import("@/lib/mongodb.server");
-    const rows = await (await mongoCollection<BotUserDocument>("bot_users")).find({}).limit(2000).toArray();
+    const rows = await (await mongoCollection<BotUserDocument>("bot_users"))
+      .find({ record_type: "bot_user" })
+      .limit(2000)
+      .toArray();
     const ids = rows.map((row) => Number(row.telegram_id));
     let sent = 0;
     for (const id of ids) {

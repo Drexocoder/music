@@ -38,7 +38,7 @@ export async function consumeQuota(key: string): Promise<Quota> {
   const monthStart = monthStartKey(now);
   const today = dayKey(now);
   const usageRows = await usageCollection
-    .find({ key_id: row._id, day: { $gte: monthStart } })
+    .find({ record_type: "usage", key_id: row._id, day: { $gte: monthStart } })
     .toArray();
   const usedToday = usageRows.find((usage) => usage.day === today)?.count ?? 0;
   const usedMonth = usageRows.reduce((sum, usage) => sum + usage.count, 0);
@@ -47,7 +47,7 @@ export async function consumeQuota(key: string): Promise<Quota> {
   if (usedMonth >= row.monthly_limit) return { ok: false, reason: "monthly_limit" };
 
   await usageCollection.updateOne(
-    { key_id: row._id, day: today },
+    { record_type: "usage", key_id: row._id, day: today },
     {
       $inc: { count: 1 },
       $set: { updated_at: now },
@@ -91,10 +91,10 @@ export async function upsertBotUser(
   const now = new Date();
   const users = await mongoCollection<BotUserDocument>("bot_users");
   await users.updateOne(
-    { telegram_id: telegramId },
+    { record_type: "bot_user", telegram_id: telegramId },
     {
-      $set: { username, first_name: firstName, updated_at: now },
-      $setOnInsert: { created_at: now },
+      $set: { record_type: "bot_user", username, first_name: firstName, updated_at: now },
+      $setOnInsert: { record_type: "bot_user", created_at: now },
     },
     { upsert: true },
   );
@@ -121,13 +121,15 @@ export async function setUserPlan(
   const planExpiresAt = plan === "free" ? null : addDays(now, 30);
   const keys = await mongoCollection<ApiKeyDocument>("api_keys");
   const result = await keys.findOneAndUpdate(
-    { telegram_id: telegramId, revoked: false, expires_at: { $gt: now } },
+    { record_type: "api_key", telegram_id: telegramId, revoked: false, expires_at: { $gt: now } },
     {
       $set: {
+        record_type: "api_key",
         ...limits,
         plan_expires_at: planExpiresAt,
       },
       $setOnInsert: {
+        record_type: "api_key",
         key: randomApiKey(),
         telegram_id: telegramId,
         revoked: false,
@@ -153,7 +155,7 @@ export async function activeKeyFor(telegramId: number): Promise<KeyRow | null> {
   const now = new Date();
   const keys = await mongoCollection<ApiKeyDocument>("api_keys");
   const row = await keys.findOne(
-    { telegram_id: telegramId, revoked: false, expires_at: { $gt: now } },
+    { record_type: "api_key", telegram_id: telegramId, revoked: false, expires_at: { $gt: now } },
     { sort: { created_at: -1 } },
   );
   return row ? keyRow(row) : null;
@@ -169,6 +171,7 @@ export async function issueKey(
   const now = new Date();
   const defaults = defaultPlan();
   const row: Omit<ApiKeyDocument, "_id"> = {
+    record_type: "api_key",
     key: randomApiKey(),
     telegram_id: telegramId,
     ...defaults,
@@ -187,7 +190,7 @@ export async function issueKey(
 export async function revokeKeys(telegramId: number): Promise<number> {
   const keys = await mongoCollection<ApiKeyDocument>("api_keys");
   const result = await keys.updateMany(
-    { telegram_id: telegramId, revoked: false },
+    { record_type: "api_key", telegram_id: telegramId, revoked: false },
     { $set: { revoked: true } },
   );
   return result.modifiedCount;
@@ -197,7 +200,7 @@ export async function usageFor(keyId: string): Promise<{ today: number; month: n
   const usage = await mongoCollection<ApiUsageDocument>("api_usage");
   const now = new Date();
   const rows = await usage
-    .find({ key_id: asObjectId(keyId), day: { $gte: monthStartKey(now) } })
+    .find({ record_type: "usage", key_id: asObjectId(keyId), day: { $gte: monthStartKey(now) } })
     .toArray();
   const today = dayKey(now);
   return {
