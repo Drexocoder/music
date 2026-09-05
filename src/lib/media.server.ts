@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
-
 export type MediaResult = {
   id: string;
   title: string;
@@ -52,9 +51,7 @@ function scrape(html: string): MediaResult[] {
   let data: unknown;
 
   try {
-    data = JSON.parse(
-      html.slice(from, end + 1),
-    );
+    data = JSON.parse(html.slice(from, end + 1));
   } catch {
     return [];
   }
@@ -75,13 +72,10 @@ function scrape(html: string): MediaResult[] {
       return;
     }
 
-    const vr = (
-      node as YtRenderer
-    ).videoRenderer;
+    const vr = (node as YtRenderer).videoRenderer;
 
     if (vr?.videoId) {
-      const title =
-        vr.title?.runs?.[0]?.text;
+      const title = vr.title?.runs?.[0]?.text;
 
       if (title) {
         out.push({
@@ -130,39 +124,26 @@ export function extractVideoId(
   try {
     const url = new URL(raw);
 
-    if (
-      url.hostname.includes(
-        "youtu.be",
-      )
-    ) {
+    if (url.hostname.includes("youtu.be")) {
       const id = url.pathname
         .slice(1)
         .split("/")[0];
 
-      return id &&
-        /^[\w-]{11}$/.test(id)
+      return id && /^[\w-]{11}$/.test(id)
         ? id
         : null;
     }
 
-    const v =
-      url.searchParams.get("v");
+    const v = url.searchParams.get("v");
 
-    if (
-      v &&
-      /^[\w-]{11}$/.test(v)
-    ) {
+    if (v && /^[\w-]{11}$/.test(v)) {
       return v;
     }
 
-    const parts =
-      url.pathname.split("/");
+    const parts = url.pathname.split("/");
+    const last = parts[parts.length - 1];
 
-    const last =
-      parts[parts.length - 1];
-
-    return last &&
-      /^[\w-]{11}$/.test(last)
+    return last && /^[\w-]{11}$/.test(last)
       ? last
       : null;
   } catch {
@@ -184,39 +165,15 @@ export async function ytSearch(
       "https://www.googleapis.com/youtube/v3/search",
     );
 
-    url.searchParams.set(
-      "part",
-      "snippet",
-    );
-
-    url.searchParams.set(
-      "type",
-      "video",
-    );
-
-    url.searchParams.set(
-      "videoEmbeddable",
-      "true",
-    );
-
-    url.searchParams.set(
-      "maxResults",
-      "25",
-    );
-
-    url.searchParams.set(
-      "q",
-      q,
-    );
-
-    url.searchParams.set(
-      "key",
-      apiKey,
-    );
+    url.searchParams.set("part", "snippet");
+    url.searchParams.set("type", "video");
+    url.searchParams.set("videoEmbeddable", "true");
+    url.searchParams.set("maxResults", "25");
+    url.searchParams.set("q", q);
+    url.searchParams.set("key", apiKey);
 
     try {
-      const res =
-        await fetch(url);
+      const res = await fetch(url);
 
       if (res.ok) {
         const json =
@@ -240,8 +197,7 @@ export async function ytSearch(
         const results =
           (json.items ?? [])
             .filter(
-              (i) =>
-                i.id?.videoId,
+              (i) => i.id?.videoId,
             )
             .map((i) => ({
               id: i.id!.videoId!,
@@ -249,13 +205,11 @@ export async function ytSearch(
                 i.snippet?.title ??
                 "Untitled",
               channel:
-                i.snippet
-                  ?.channelTitle ??
+                i.snippet?.channelTitle ??
                 "YouTube",
               thumbnail:
-                i.snippet
-                  ?.thumbnails
-                  ?.high?.url ??
+                i.snippet?.thumbnails?.high
+                  ?.url ??
                 `https://i.ytimg.com/vi/${i.id!.videoId!}/hqdefault.jpg`,
             }));
 
@@ -268,8 +222,7 @@ export async function ytSearch(
     }
   }
 
-  const inner =
-    await innertubeSearch(q);
+  const inner = await innertubeSearch(q);
 
   if (inner.length) {
     return {
@@ -300,14 +253,12 @@ export async function ytSearch(
       };
     }
 
-    const results =
-      scrape(await res.text());
+    const results = scrape(await res.text());
 
     if (!results.length) {
       return {
         results: [],
-        error:
-          "No results found.",
+        error: "No results found.",
       };
     }
 
@@ -343,8 +294,7 @@ async function innertubeSearch(
         },
         body: JSON.stringify({
           query: q,
-          params:
-            "EgIQAQ%3D%3D",
+          params: "EgIQAQ%3D%3D",
           context: {
             client: {
               clientName: "WEB",
@@ -379,9 +329,8 @@ async function innertubeSearch(
         return;
       }
 
-      const vr = (
-        node as YtRenderer
-      ).videoRenderer;
+      const vr =
+        (node as YtRenderer).videoRenderer;
 
       if (vr?.videoId) {
         const title =
@@ -399,8 +348,7 @@ async function innertubeSearch(
             ...(vr.lengthText?.simpleText
               ? {
                   duration:
-                    vr.lengthText
-                      .simpleText,
+                    vr.lengthText.simpleText,
                 }
               : {}),
           });
@@ -408,17 +356,13 @@ async function innertubeSearch(
       }
 
       Object.values(
-        node as Record<
-          string,
-          unknown
-        >,
+        node as Record<string, unknown>,
       ).forEach(walk);
     };
 
     walk(json);
 
-    const seen =
-      new Set<string>();
+    const seen = new Set<string>();
 
     return out.filter((r) =>
       seen.has(r.id)
@@ -462,13 +406,16 @@ export async function ytMeta(
 }
 
 /**
- * Local yt-dlp is enabled by default.
+ * Local downloader is enabled by default.
+ *
+ * IMPORTANT:
+ * The actual Vercel download implementation
+ * will be connected separately through the
+ * Python yt-dlp function.
  */
 function localDownloaderEnabled(): boolean {
   const configured =
-    process.env[
-      "DOWNLOAD_LOCAL_ENABLED"
-    ]
+    process.env["DOWNLOAD_LOCAL_ENABLED"]
       ?.trim()
       .toLowerCase();
 
@@ -485,166 +432,30 @@ function localDownloaderEnabled(): boolean {
 export function providerConfigured(): boolean {
   return (
     Boolean(
-      process.env[
-        "DOWNLOAD_API_URL"
-      ],
+      process.env["DOWNLOAD_API_URL"],
     ) ||
     localDownloaderEnabled()
   );
 }
 
 /**
- * Download media using the yt-dlp binary
- * bundled by youtube-dl-exec.
+ * Temporary placeholder.
+ *
+ * We intentionally do NOT import
+ * youtube-dl-exec anymore.
+ *
+ * Vercel's Python function will handle
+ * yt-dlp downloads.
  */
 async function fetchLocalMedia(
-  videoId: string,
-  type: "audio" | "video",
+  _videoId: string,
+  _type: "audio" | "video",
 ): Promise<Response | null> {
-  const directory =
-    await mkdtemp(
-      join(
-        tmpdir(),
-        "aurora-media-",
-      ),
-    );
+  console.error(
+    "[media] Local yt-dlp downloader is handled by the Python Vercel function.",
+  );
 
-  const output =
-    join(
-      directory,
-      "media.%(ext)s",
-    );
-
-  const target =
-    `https://www.youtube.com/watch?v=${videoId}`;
-
-  try {
-    if (type === "audio") {
-      await youtubedl(
-        target,
-        {
-          noPlaylist: true,
-          noProgress: true,
-          noWarnings: true,
-          extractAudio: true,
-          audioFormat: "mp3",
-          audioQuality: "5",
-          output,
-        },
-        {
-          timeout: 240000,
-        },
-      );
-    } else {
-      await youtubedl(
-        target,
-        {
-          noPlaylist: true,
-          noProgress: true,
-          noWarnings: true,
-          format:
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-          mergeOutputFormat: "mp4",
-          output,
-        },
-        {
-          timeout: 240000,
-        },
-      );
-    }
-
-    const fileName =
-      (
-        await readdir(
-          directory,
-        )
-      ).find((name) =>
-        name.startsWith(
-          "media.",
-        ),
-      );
-
-    if (!fileName) {
-      console.error(
-        "[media] yt-dlp completed but no media file was created.",
-      );
-
-      await rm(directory, {
-        recursive: true,
-        force: true,
-      });
-
-      return null;
-    }
-
-    const filePath =
-      join(
-        directory,
-        fileName,
-      );
-
-    const fileStat =
-      await stat(filePath);
-
-    const stream =
-      createReadStream(
-        filePath,
-      );
-
-    const cleanup =
-      () =>
-        void rm(
-          directory,
-          {
-            recursive: true,
-            force: true,
-          },
-        );
-
-    stream.once(
-      "close",
-      cleanup,
-    );
-
-    stream.once(
-      "error",
-      cleanup,
-    );
-
-    return new Response(
-      Readable.toWeb(
-        stream,
-      ) as unknown as BodyInit,
-      {
-        headers: {
-          "content-type":
-            type === "audio"
-              ? "audio/mpeg"
-              : "video/mp4",
-
-          "content-length":
-            String(
-              fileStat.size,
-            ),
-
-          "cache-control":
-            "no-store, no-cache, must-revalidate",
-        },
-      },
-    );
-  } catch (error) {
-    console.error(
-      "[media] Local downloader failed:",
-      error,
-    );
-
-    await rm(directory, {
-      recursive: true,
-      force: true,
-    });
-
-    return null;
-  }
+  return null;
 }
 
 /**
@@ -652,16 +463,14 @@ async function fetchLocalMedia(
  *
  * Priority:
  * 1. DOWNLOAD_API_URL if configured.
- * 2. Local youtube-dl-exec otherwise.
+ * 2. Python yt-dlp Vercel function.
  */
 export async function fetchMedia(
   videoId: string,
   type: "audio" | "video",
 ): Promise<Response | null> {
   const base =
-    process.env[
-      "DOWNLOAD_API_URL"
-    ];
+    process.env["DOWNLOAD_API_URL"];
 
   /*
    * Keep the existing external-provider
@@ -669,9 +478,7 @@ export async function fetchMedia(
    */
   if (base) {
     const key =
-      process.env[
-        "DOWNLOAD_API_KEY"
-      ] ?? "";
+      process.env["DOWNLOAD_API_KEY"] ?? "";
 
     const url = new URL(
       "/download",
@@ -724,19 +531,13 @@ export async function fetchMedia(
   }
 
   /*
-   * Vercel/local fallback:
-   * youtube-dl-exec supplies yt-dlp.
+   * The Python yt-dlp Vercel function
+   * will be wired into the API route next.
    */
-  if (
-    localDownloaderEnabled()
-  ) {
-    return fetchLocalMedia(
-      videoId,
-      type,
-    );
-  }
-
-  return null;
+  return fetchLocalMedia(
+    videoId,
+    type,
+  );
 }
 
 export function safeFileName(
