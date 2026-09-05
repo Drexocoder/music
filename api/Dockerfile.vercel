@@ -11,9 +11,11 @@ RUN apt-get update \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Deno JavaScript runtime for yt-dlp
+# Install Deno
+# yt-dlp uses Deno for YouTube JavaScript challenge solving.
 RUN curl -fsSL https://deno.land/install.sh | sh
 
+# Make Deno available to yt-dlp
 ENV PATH="/root/.deno/bin:${PATH}"
 
 # Install latest yt-dlp
