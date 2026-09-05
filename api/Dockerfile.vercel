@@ -7,9 +7,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
         curl \
+        ca-certificates \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp
+# Install Deno JavaScript runtime for yt-dlp
+RUN curl -fsSL https://deno.land/install.sh | sh
+
+ENV PATH="/root/.deno/bin:${PATH}"
+
+# Install latest yt-dlp
 RUN pip install --no-cache-dir --upgrade yt-dlp
 
 # Copy downloader service
