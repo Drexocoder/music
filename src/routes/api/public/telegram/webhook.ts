@@ -1,13 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createHash, timingSafeEqual } from "crypto";
-import banner from "@/assets/bot-banner.jpg.asset.json";
 import { OWNER_TELEGRAM_ID, PLANS, SUPPORT_HANDLE, planById } from "@/lib/plans";
-
-const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
-
-function deriveSecret(apiKey: string): string {
-  return createHash("sha256").update(`telegram-webhook:${apiKey}`).digest("base64url");
-}
+import { telegramRequest, telegramWebhookSecret } from "@/lib/telegram.server";
 
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
@@ -16,15 +10,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 async function tg(method: string, body: unknown) {
-  const res = await fetch(`${GATEWAY}/${method}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env["LOVABLE_API_KEY"]}`,
-      "X-Connection-Api-Key": `${process.env["TELEGRAM_API_KEY"]}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await telegramRequest(method, body);
   if (!res.ok) {
     console.error(`Telegram ${method} failed [${res.status}]: ${await res.text()}`);
   }
@@ -421,21 +407,21 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const apiKey = process.env["TELEGRAM_API_KEY"];
-        if (!apiKey) return new Response("Not configured", { status: 500 });
+        if (!process.env["TELEGRAM_BOT_TOKEN"] && !process.env["TELEGRAM_API_KEY"]) {
+          return new Response("Not configured", { status: 500 });
+        }
 
         const provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token") ?? "";
-        if (!safeEqual(provided, deriveSecret(apiKey))) {
+        if (!safeEqual(provided, telegramWebhookSecret())) {
           return new Response("Unauthorized", { status: 401 });
         }
 
         const update = (await request.json()) as Update;
         const origin = new URL(request.url).origin;
 
-        // Ack Telegram immediately (avoids retries + gives the user a snappy feel);
-        // do the real work in the background so Telegram never waits on our API calls.
-        background(handleUpdate(update, origin));
-
+        // Await the handler: Vercel may freeze a function as soon as a response
+        // is returned, so fire-and-forget work is not reliable there.
+        await handleUpdate(update, origin);
         return Response.json({ ok: true });
       },
     },

@@ -1,0 +1,1 @@
+- [Telegram deployment](telegram-deployment.md) — Vercel uses direct Bot API webhooks; Kurigram polling belongs on a separate always-on worker.

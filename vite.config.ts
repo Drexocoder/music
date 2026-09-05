@@ -7,6 +7,17 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  vite: {
+    server: {
+      // Replit's preview proxy uses a generated host for each workspace.
+      allowedHosts: true,
+    },
+  },
+  // Vercel needs a Node-compatible serverless output instead of the wrapper's
+  // default Cloudflare worker target.
+  nitro: {
+    preset: "vercel",
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this

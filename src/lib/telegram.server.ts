@@ -1,17 +1,39 @@
-/** Server-only Telegram helpers: gateway calls + message logging. */
+/** Server-only Telegram helpers: direct Bot API calls + message logging. */
 
-export const TELEGRAM_GATEWAY = "https://connector-gateway.lovable.dev/telegram";
+import { createHash } from "crypto";
 
-export async function tgCall(method: string, body: unknown) {
-  const res = await fetch(`${TELEGRAM_GATEWAY}/${method}`, {
+function botToken(): string {
+  const token = process.env["TELEGRAM_BOT_TOKEN"] ?? process.env["TELEGRAM_API_KEY"];
+  if (!token) {
+    throw new Error("Missing TELEGRAM_BOT_TOKEN environment variable.");
+  }
+  return token;
+}
+
+/**
+ * Telegram only accepts a secret token when it is configured with setWebhook.
+ * Keep a deterministic fallback so the webhook can be configured with one
+ * curl command, while allowing operators to rotate it independently.
+ */
+export function telegramWebhookSecret(): string {
+  const configured = process.env["TELEGRAM_WEBHOOK_SECRET"];
+  if (configured) return configured;
+  return createHash("sha256").update(`telegram-webhook:${botToken()}`).digest("base64url");
+}
+
+export async function telegramRequest(method: string, body: unknown) {
+  const res = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env["LOVABLE_API_KEY"]}`,
-      "X-Connection-Api-Key": `${process.env["TELEGRAM_API_KEY"]}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
+  return res;
+}
+
+export async function tgCall(method: string, body: unknown) {
+  const res = await telegramRequest(method, body);
   const text = await res.text();
   if (!res.ok) console.error(`Telegram ${method} failed [${res.status}]: ${text}`);
   try {
