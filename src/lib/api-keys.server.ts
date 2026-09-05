@@ -161,7 +161,7 @@ export async function activeKeyFor(telegramId: number): Promise<KeyRow | null> {
   return row ? keyRow(row) : null;
 }
 
-/** One free key per user per month. Returns the existing key if still valid. */
+/** Returns the user's active key, or creates one with the Free plan defaults. */
 export async function issueKey(
   telegramId: number,
 ): Promise<{ key: KeyRow; created: boolean }> {

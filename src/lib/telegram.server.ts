@@ -21,10 +21,13 @@ export function telegramWebhookSecret(): string {
   return createHash("sha256").update(`telegram-webhook:${botToken()}`).digest("base64url");
 }
 
-/** Build a Telegram-reachable origin when Replit/Vercel proxies use HTTP internally. */
+/** Build a Telegram-reachable origin from the public proxy headers. */
 export function publicOrigin(request: Request): string {
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (host) return `https://${host}`;
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || request.headers.get("host");
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const protocol = forwardedProto === "http" || forwardedProto === "https" ? forwardedProto : "https";
+  if (host) return `${protocol}://${host}`;
   return new URL(request.url).origin.replace(/^http:/, "https:");
 }
 

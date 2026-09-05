@@ -49,7 +49,8 @@ mkae like thiss a msuic player fetches from youttube
 Aurora uses a Vercel-compatible serverless Telegram webhook. It does not start a
 long-running polling process, so it can run alongside the web app on one Vercel
 project. The existing `/api/public/telegram/webhook` endpoint handles bot
-commands and `/key` generates a MongoDB-backed API key for each Telegram user.
+commands and `/key` generates one active MongoDB-backed API key per Telegram user.
+New keys use the Free plan defaults and have the format `Nex_<random>_Aurora`.
 
 1. Import this repository into Vercel and keep the default build command
    `npm run build`.
