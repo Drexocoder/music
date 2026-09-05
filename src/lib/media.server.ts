@@ -438,10 +438,40 @@ async function fetchLocalMedia(
     return null;
   }
 
+  /*
+   * Replit/local development: the Python downloader can run beside
+   * the frontend on localhost:8080.
+   *
+   * Vercel Services are different containers, so localhost there is
+   * the frontend container, NOT the downloader container. On Vercel,
+   * use the public /api/download rewrite instead.
+   */
+  const isVercel = Boolean(process.env["VERCEL"]);
+
+  if (isVercel) {
+    const publicAppUrl =
+      process.env["PUBLIC_APP_URL"]?.trim().replace(/\/+$/, "");
+
+    if (!publicAppUrl) {
+      console.error(
+        "[media] Vercel downloader fallback requires PUBLIC_APP_URL.",
+      );
+      return null;
+    }
+
+    return fetchDownloader(
+      publicAppUrl,
+      videoId,
+      type,
+      true,
+    );
+  }
+
   return fetchDownloader(
     "http://127.0.0.1:8080",
     videoId,
     type,
+    false,
   );
 }
 
@@ -449,22 +479,29 @@ async function fetchDownloader(
   base: string,
   videoId: string,
   type: "audio" | "video",
+  useVercelRewrite = false,
 ): Promise<Response | null> {
   const key =
     process.env["DOWNLOAD_API_KEY"] ?? "";
 
   try {
-    const url = new URL(
-      "/download",
-      base.startsWith("http")
-        ? base
-        : `https://${base}`,
-    );
+    const normalizedBase = base
+      .trim()
+      .replace(/\/+$/, "");
 
-    url.searchParams.set(
-      "url",
-      videoId,
-    );
+    const url = useVercelRewrite
+      ? new URL(
+          `/api/download/${encodeURIComponent(videoId)}`,
+          normalizedBase.startsWith("http")
+            ? normalizedBase
+            : `https://${normalizedBase}`,
+        )
+      : new URL(
+          "/download",
+          normalizedBase.startsWith("http")
+            ? normalizedBase
+            : `https://${normalizedBase}`,
+        );
 
     url.searchParams.set(
       "type",
@@ -479,6 +516,7 @@ async function fetchDownloader(
             ? { "x-api-key": key }
             : {}),
         },
+        cache: "no-store",
       });
 
     if (
@@ -488,8 +526,15 @@ async function fetchDownloader(
       return res;
     }
 
+    let details = "";
+    try {
+      details = await res.text();
+    } catch {
+      // Ignore response-body parsing errors.
+    }
+
     console.error(
-      `[media] Downloader returned ${res.status}`,
+      `[media] Downloader returned ${res.status}${details ? `: ${details.slice(0, 500)}` : ""}`,
     );
   } catch (error) {
     console.error(
@@ -502,22 +547,27 @@ async function fetchDownloader(
 }
 
 /**
- * Download media through an explicitly configured remote service, or through
- * the local Python service used by the Replit development workflow.
+ * Download media through:
+ *
+ * 1. Explicit DOWNLOAD_API_URL when configured.
+ * 2. The Vercel /api/download rewrite when running on Vercel.
+ * 3. The local Python downloader on Replit/local development.
  */
 export async function fetchMedia(
   videoId: string,
   type: "audio" | "video",
 ): Promise<Response | null> {
   const base =
-    process.env["DOWNLOAD_API_URL"];
+    process.env["DOWNLOAD_API_URL"]?.trim();
 
   if (base) {
-    const response = await fetchDownloader(
-      base,
-      videoId,
-      type,
-    );
+    const response =
+      await fetchDownloader(
+        base,
+        videoId,
+        type,
+        false,
+      );
 
     if (response) {
       return response;
