@@ -29,12 +29,11 @@ export function publicOrigin(request: Request): string {
 }
 
 export async function telegramRequest(method: string, body: unknown) {
+  const isMultipart = typeof FormData !== "undefined" && body instanceof FormData;
   const res = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+    ...(isMultipart ? {} : { headers: { "Content-Type": "application/json" } }),
+    body: (isMultipart ? body : JSON.stringify(body)) as BodyInit,
   });
   return res;
 }

@@ -46,7 +46,6 @@ export type TelegramMessageDocument = {
 };
 
 let clientPromise: Promise<MongoClient> | undefined;
-let indexesPromise: Promise<void> | undefined;
 
 function mongoUri(): string {
   const uri = process.env["MONGODB_URI"]?.trim();
@@ -79,39 +78,9 @@ async function connectedClient(): Promise<MongoClient> {
   return clientPromise;
 }
 
-async function ensureIndexes(db: Awaited<ReturnType<MongoClient["db"]>>): Promise<void> {
-  await Promise.all([
-    db.collection<ApiKeyDocument>("api_keys").createIndexes([
-      { key: { key: 1 }, unique: true },
-      { key: { telegram_id: 1, revoked: 1, expires_at: -1 } },
-    ]),
-    db.collection<BotUserDocument>("bot_users").createIndex({ telegram_id: 1 }, { unique: true }),
-    db.collection<ApiUsageDocument>("api_usage").createIndexes([
-      { key: { key_id: 1, day: 1 }, unique: true },
-      { key: { day: 1 } },
-    ]),
-    db.collection<TelegramMessageDocument>("telegram_messages").createIndexes([
-      { key: { chat_id: 1, created_at: -1 } },
-      { key: { created_at: -1 } },
-      {
-        key: { update_id: 1 },
-        unique: true,
-        sparse: true,
-      },
-    ]),
-  ]).then(() => undefined);
-}
-
 export async function mongoDb() {
   const client = await connectedClient();
   const db = client.db(databaseName(mongoUri()));
-  if (!indexesPromise) {
-    indexesPromise = ensureIndexes(db).catch((error) => {
-      indexesPromise = undefined;
-      throw error;
-    });
-  }
-  await indexesPromise;
   return db;
 }
 

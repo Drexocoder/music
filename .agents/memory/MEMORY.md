@@ -1,1 +1,2 @@
 - [Telegram deployment](telegram-deployment.md) — Vercel uses direct Bot API webhooks; Kurigram polling belongs on a separate always-on worker.
+- [MongoDB persistence](mongodb-persistence.md) — Telegram/API data uses lazy MongoDB persistence; the selected Atlas cluster has a 500-collection limit.

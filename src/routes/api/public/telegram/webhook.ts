@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createHash, timingSafeEqual } from "crypto";
 import { OWNER_TELEGRAM_ID, PLANS, SUPPORT_HANDLE, planById } from "@/lib/plans";
+import { FILE as YOUTUBE_GUIDE } from "@/lib/guide-youtube-py";
 import { publicOrigin, telegramRequest, telegramWebhookSecret } from "@/lib/telegram.server";
 
 function safeEqual(a: string, b: string): boolean {
@@ -178,10 +179,18 @@ async function handleUpdate(update: Update, origin: string) {
   }
 
   if (cmd === "/guide" || cmd === "/docs") {
-    await tg("sendDocument", {
-      chat_id: chatId,
-      document: `${origin}/api/public/guide/youtube.py`,
-      caption: [
+    const guide = new FormData();
+    guide.append("chat_id", String(chatId));
+    guide.append(
+      "document",
+      new Blob([YOUTUBE_GUIDE.replaceAll("{ORIGIN}", origin)], {
+        type: "text/x-python",
+      }),
+      "youtube.py",
+    );
+    guide.append(
+      "caption",
+      [
         "📄 <b>youtube.py</b> — drop this into your music bot.",
         "",
         "1. <code>pip install aiohttp</code>",
@@ -190,8 +199,9 @@ async function handleUpdate(update: Update, origin: string) {
         "",
         `Full docs: ${origin}/developers`,
       ].join("\n"),
-      parse_mode: "HTML",
-    });
+    );
+    guide.append("parse_mode", "HTML");
+    await tg("sendDocument", guide);
     return;
   }
 
