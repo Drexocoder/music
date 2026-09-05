@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import youtubedl from "youtube-dl-exec";
+
 
 export type MediaResult = {
   id: string;
