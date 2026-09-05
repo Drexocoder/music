@@ -1,0 +1,157 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-glow: var(--glow);
+
+  --shadow-glow: 0 0 0 1px oklch(0.78 0.17 62 / 0.25), 0 10px 40px -10px oklch(0.78 0.17 62 / 0.45);
+  --shadow-panel: 0 24px 60px -24px oklch(0 0 0 / 0.9);
+}
+
+:root {
+  --radius: 0.9rem;
+
+  --background: oklch(0.16 0.012 55);
+  --foreground: oklch(0.96 0.008 80);
+  --surface: oklch(0.2 0.014 58);
+  --surface-2: oklch(0.245 0.016 60);
+
+  --card: oklch(0.2 0.014 58);
+  --card-foreground: oklch(0.96 0.008 80);
+  --popover: oklch(0.21 0.015 58);
+  --popover-foreground: oklch(0.96 0.008 80);
+
+  --primary: oklch(0.79 0.16 62);
+  --primary-foreground: oklch(0.18 0.02 60);
+  --glow: oklch(0.79 0.16 62);
+
+  --secondary: oklch(0.26 0.016 60);
+  --secondary-foreground: oklch(0.94 0.008 80);
+  --muted: oklch(0.26 0.014 60);
+  --muted-foreground: oklch(0.7 0.014 70);
+  --accent: oklch(0.72 0.13 25);
+  --accent-foreground: oklch(0.98 0.005 80);
+
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0.98 0.005 80);
+
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.79 0.16 62 / 60%);
+
+  --gradient-hero: radial-gradient(
+      120% 90% at 12% 0%,
+      oklch(0.35 0.09 62 / 0.55) 0%,
+      transparent 60%
+    ),
+    radial-gradient(90% 80% at 95% 10%, oklch(0.35 0.1 20 / 0.35) 0%, transparent 55%);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(1 0 0 / 0.12);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@utility hero-glow {
+  background-image: var(--gradient-hero);
+}
+
+@utility glass {
+  background: color-mix(in oklab, var(--surface) 75%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+@utility text-gradient {
+  background: linear-gradient(
+    100deg,
+    oklch(0.96 0.008 80) 10%,
+    oklch(0.82 0.15 62) 55%,
+    oklch(0.76 0.13 25) 95%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@keyframes eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@utility animate-eq {
+  animation: eq-bounce 900ms ease-in-out infinite;
+  transform-origin: bottom;
+}
