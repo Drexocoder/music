@@ -378,7 +378,7 @@ async function handleUpdate(update: Update, origin: string) {
       [
         `🎵 <b>${title}</b>`,
         "",
-        "The download service isn't switched on yet, so here is the track to play:",
+        "Downloads are unavailable on this deployment, so here is the track to play:",
         `${origin}/?v=${videoId}`,
       ].join("\n"),
       {

@@ -3,6 +3,13 @@
  * Never import this from client components.
  */
 
+import { spawn } from "node:child_process";
+import { createReadStream } from "node:fs";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
+
 export type MediaResult = {
   id: string;
   title: string;
@@ -221,9 +228,93 @@ export async function ytMeta(videoId: string): Promise<MediaResult | null> {
   }
 }
 
-/** Base URL of the upstream media provider that produces the actual files. */
+function localDownloaderEnabled(): boolean {
+  const configured = process.env["DOWNLOAD_LOCAL_ENABLED"]?.trim().toLowerCase();
+  if (configured === "false" || configured === "0") return false;
+  if (configured === "true" || configured === "1") return true;
+  return !process.env["VERCEL"];
+}
+
+/** A remote provider is optional; non-Vercel runtimes can use local yt-dlp. */
 export function providerConfigured(): boolean {
-  return Boolean(process.env["DOWNLOAD_API_URL"]);
+  return Boolean(process.env["DOWNLOAD_API_URL"]) || localDownloaderEnabled();
+}
+
+async function fetchLocalMedia(videoId: string, type: "audio" | "video"): Promise<Response | null> {
+  const directory = await mkdtemp(join(tmpdir(), "aurora-media-"));
+  const output = join(directory, "media.%(ext)s");
+  const target = `https://www.youtube.com/watch?v=${videoId}`;
+  const args =
+    type === "audio"
+      ? [
+          "run",
+          "yt-dlp",
+          "--no-playlist",
+          "--no-progress",
+          "--no-warnings",
+          "--extract-audio",
+          "--audio-format",
+          "mp3",
+          "--audio-quality",
+          "5",
+          "--output",
+          output,
+          target,
+        ]
+      : [
+          "run",
+          "yt-dlp",
+          "--no-playlist",
+          "--no-progress",
+          "--no-warnings",
+          "--format",
+          "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+          "--merge-output-format",
+          "mp4",
+          "--output",
+          output,
+          target,
+        ];
+
+  try {
+    const stderr: Buffer[] = [];
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      const child = spawn("uv", args, { stdio: ["ignore", "ignore", "pipe"] });
+      child.stderr.on("data", (chunk: Buffer) => {
+        if (stderr.reduce((total, part) => total + part.length, 0) < 16_384) stderr.push(chunk);
+      });
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    if (exitCode !== 0) {
+      console.error(`[media] yt-dlp failed (${exitCode}): ${Buffer.concat(stderr).toString("utf8")}`);
+      await rm(directory, { recursive: true, force: true });
+      return null;
+    }
+
+    const fileName = (await readdir(directory)).find((name) => name.startsWith("media."));
+    if (!fileName) {
+      await rm(directory, { recursive: true, force: true });
+      return null;
+    }
+    const filePath = join(directory, fileName);
+    const fileStat = await stat(filePath);
+    const stream = createReadStream(filePath);
+    const cleanup = () => void rm(directory, { recursive: true, force: true });
+    stream.once("close", cleanup);
+    stream.once("error", cleanup);
+
+    return new Response(Readable.toWeb(stream) as ReadableStream, {
+      headers: {
+        "content-type": type === "audio" ? "audio/mpeg" : "video/mp4",
+        "content-length": String(fileStat.size),
+      },
+    });
+  } catch (error) {
+    console.error("[media] Local downloader failed:", error);
+    await rm(directory, { recursive: true, force: true });
+    return null;
+  }
 }
 
 /**
@@ -235,7 +326,7 @@ export async function fetchMedia(
   type: "audio" | "video",
 ): Promise<Response | null> {
   const base = process.env["DOWNLOAD_API_URL"];
-  if (!base) return null;
+  if (!base) return localDownloaderEnabled() ? fetchLocalMedia(videoId, type) : null;
   const key = process.env["DOWNLOAD_API_KEY"] ?? "";
   const url = new URL("/download", base.startsWith("http") ? base : `https://${base}`);
   url.searchParams.set("url", videoId);
