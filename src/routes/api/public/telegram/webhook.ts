@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createHash, timingSafeEqual } from "crypto";
 import { OWNER_TELEGRAM_ID, PLANS, SUPPORT_HANDLE, planById } from "@/lib/plans";
-import { telegramRequest, telegramWebhookSecret } from "@/lib/telegram.server";
+import { publicOrigin, telegramRequest, telegramWebhookSecret } from "@/lib/telegram.server";
 
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
@@ -417,7 +417,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
         }
 
         const update = (await request.json()) as Update;
-        const origin = new URL(request.url).origin;
+        const origin = publicOrigin(request);
 
         // Await the handler: Vercel may freeze a function as soon as a response
         // is returned, so fire-and-forget work is not reliable there.

@@ -56,8 +56,15 @@ commands and `/key` generates a Supabase-backed API key for each Telegram user.
 2. Add the variables in `.env.example` to the Vercel project settings. At
    minimum, configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
    `TELEGRAM_BOT_TOKEN`.
-3. After the first deployment, configure Telegram's webhook. Replace the
-   placeholders with your deployed domain and token:
+3. After the first deployment, register the webhook from the running app. The
+   server reads `TELEGRAM_BOT_TOKEN` and derives the matching secret internally:
+
+```sh
+curl -X POST "https://<your-domain>/api/public/telegram/setup"
+```
+
+It returns the registered webhook URL but never returns the bot token. If you
+prefer to configure it directly with Telegram, replace the placeholders below:
 
 ```sh
 curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \

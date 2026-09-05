@@ -21,6 +21,13 @@ export function telegramWebhookSecret(): string {
   return createHash("sha256").update(`telegram-webhook:${botToken()}`).digest("base64url");
 }
 
+/** Build a Telegram-reachable origin when Replit/Vercel proxies use HTTP internally. */
+export function publicOrigin(request: Request): string {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (host) return `https://${host}`;
+  return new URL(request.url).origin.replace(/^http:/, "https:");
+}
+
 export async function telegramRequest(method: string, body: unknown) {
   const res = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
     method: "POST",
