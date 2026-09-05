@@ -2,7 +2,6 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
@@ -11,25 +10,19 @@ RUN apt-get update \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Deno
-# yt-dlp uses Deno for YouTube JavaScript challenge solving.
 RUN curl -fsSL https://deno.land/install.sh | sh
 
-# Make Deno available to yt-dlp
 ENV PATH="/root/.deno/bin:${PATH}"
 
-# Install latest yt-dlp
-RUN pip install --no-cache-dir --upgrade yt-dlp
+RUN python3 -m pip install --no-cache-dir --upgrade \
+    "yt-dlp[default]"
 
-# Copy downloader service
 COPY . .
 
-# Runtime environment
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PORT=8080
 
 EXPOSE 8080
 
-# Start Aurora downloader
 CMD ["python3", "server.py"]
