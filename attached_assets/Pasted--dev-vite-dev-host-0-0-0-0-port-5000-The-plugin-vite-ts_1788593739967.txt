@@ -1,0 +1,204 @@
+
+> dev
+> vite dev --host 0.0.0.0 --port 5000
+
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+  VITE v8.1.5  ready in 1398 ms
+
+  ➜  Local:   http://localhost:5000/
+  ➜  Network: http://172.24.0.2:5000/
+  ➜  press h + enter to show help
+7:34:33 AM [vite] (ssr) connected.
+⚠️  Node.js 20 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 22 or later. For more information, visit: https://github.com/orgs/supabase/discussions/45715
+7:34:35 AM [vite] (ssr) warning: /home/runner/workspace/src/lib/lyrics.functions.ts:17:28 createServerFn().inputValidator() is deprecated. Use createServerFn().validator() instead.
+  Plugin: tanstack-start-core::server-fn:ssr
+  File: /home/runner/workspace/src/lib/lyrics.functions.ts
+7:34:37 AM [vite] (client) warning: /home/runner/workspace/src/lib/lyrics.functions.ts:17:28 createServerFn().inputValidator() is deprecated. Use createServerFn().validator() instead.
+  Plugin: tanstack-start-core::server-fn:client
+  File: /home/runner/workspace/src/lib/lyrics.functions.ts
+7:34:37 AM [vite] (client) [console.error] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <Await promise={Promise}>
+      <AwaitInner promise={Promise}>
+        <RouterProvider router={{...}}>
+          <RouterContextProvider router={{...}}>
+            <Matches>
+              <SafeFragment fallback={null}>
+                <Transitioner>
+                <MatchesInner>
+                  <CatchBoundary getResetKey={function getResetKey} errorComponent={function ErrorComponent} ...>
+                    <CatchBoundaryImpl getResetKey={function getResetKey} onCatch={function}>
+                      <MatchImpl matchId="__root__/">
+                        <MatchView router={{...}} matchId="__root__/" resetKey={0} matchState={{routeId:"_...", ...}}>
+                          <RootShell>
+                            <html lang="en" data-tsd-source="/src/route...">
+                              <head
++                               data-tsd-source="/src/routes/__root.tsx:110:7"
+-                               data-tsd-source={null}
+                              >
+                              ...
+
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
+[bot bg] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at async upsertBotUser (/home/runner/workspace/src/lib/api-keys.server.ts:48:14)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[bot bg] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async upsertBotUser (/home/runner/workspace/src/lib/api-keys.server.ts:48:14)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
+Telegram sendDocument failed [400]: {"ok":false,"error_code":400,"description":"Bad Request: failed to get HTTP URL content"}
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[bot bg] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async upsertBotUser (/home/runner/workspace/src/lib/api-keys.server.ts:48:14)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
+Telegram sendDocument failed [400]: {"ok":false,"error_code":400,"description":"Bad Request: failed to get HTTP URL content"}
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[bot bg] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async upsertBotUser (/home/runner/workspace/src/lib/api-keys.server.ts:48:14)
+Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async activeKeyFor (/home/runner/workspace/src/lib/api-keys.server.ts:88:14)
+    at async issueKey (/home/runner/workspace/src/lib/api-keys.server.ts:104:20)
+    at async handleUpdate (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:247:30)
+    at async POST (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:424:9)
+    at async eval (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:339:22)
+    at async next (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:301:16)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[bot bg] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async upsertBotUser (/home/runner/workspace/src/lib/api-keys.server.ts:48:14)
+Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async activeKeyFor (/home/runner/workspace/src/lib/api-keys.server.ts:88:14)
+    at async issueKey (/home/runner/workspace/src/lib/api-keys.server.ts:104:20)
+    at async handleUpdate (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:247:30)
+    at async POST (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:424:9)
+    at async eval (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:339:22)
+    at async next (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:301:16)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[bot bg] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async upsertBotUser (/home/runner/workspace/src/lib/api-keys.server.ts:48:14)
+Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async activeKeyFor (/home/runner/workspace/src/lib/api-keys.server.ts:88:14)
+    at async issueKey (/home/runner/workspace/src/lib/api-keys.server.ts:104:20)
+    at async handleUpdate (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:247:30)
+    at async POST (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:424:9)
+    at async eval (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:339:22)
+    at async next (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:301:16)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[bot bg] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async upsertBotUser (/home/runner/workspace/src/lib/api-keys.server.ts:48:14)
+Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at admin (/home/runner/workspace/src/lib/api-keys.server.ts:9:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async activeKeyFor (/home/runner/workspace/src/lib/api-keys.server.ts:88:14)
+    at async issueKey (/home/runner/workspace/src/lib/api-keys.server.ts:104:20)
+    at async handleUpdate (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:247:30)
+    at async POST (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:424:9)
+    at async eval (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:339:22)
+    at async next (/home/runner/workspace/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:301:16)
+[Supabase] Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+[telegram log] Error: Missing Supabase environment variable(s): SUPABASE_SERVICE_ROLE_KEY. Connect Supabase in Lovable Cloud.
+    at createSupabaseAdminClient (/home/runner/workspace/src/integrations/supabase/client.server.ts:43:11)
+    at Object.get (/home/runner/workspace/src/integrations/supabase/client.server.ts:66:43)
+    at logMessage (/home/runner/workspace/src/lib/telegram.server.ts:67:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async log (/home/runner/workspace/src/routes/api/public/telegram/webhook.ts:142:5)
