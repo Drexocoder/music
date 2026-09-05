@@ -1,5 +1,5 @@
 /**
- * Server-only media helpers: YouTube search + download provider proxy.
+ * Server-only media helpers: YouTube search + local yt-dlp downloader.
  * Never import this from client components.
  */
 
@@ -31,10 +31,13 @@ function scrape(html: string): MediaResult[] {
   const marker = "var ytInitialData = ";
   const start = html.indexOf(marker);
   if (start === -1) return [];
+
   const from = start + marker.length;
   const end = html.indexOf("};", from);
   if (end === -1) return [];
+
   let data: unknown;
+
   try {
     data = JSON.parse(html.slice(from, end + 1));
   } catch {
@@ -42,64 +45,91 @@ function scrape(html: string): MediaResult[] {
   }
 
   const out: MediaResult[] = [];
+
   const walk = (node: unknown) => {
     if (out.length >= 30 || !node || typeof node !== "object") return;
+
     if (Array.isArray(node)) {
       node.forEach(walk);
       return;
     }
+
     const vr = (node as YtRenderer).videoRenderer;
+
     if (vr?.videoId) {
       const title = vr.title?.runs?.[0]?.text;
+
       if (title) {
         out.push({
           id: vr.videoId,
           title,
           channel: vr.ownerText?.runs?.[0]?.text ?? "YouTube",
           thumbnail: `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`,
-          ...(vr.lengthText?.simpleText ? { duration: vr.lengthText.simpleText } : {}),
+          ...(vr.lengthText?.simpleText
+            ? { duration: vr.lengthText.simpleText }
+            : {}),
         });
       }
     }
+
     Object.values(node as Record<string, unknown>).forEach(walk);
   };
+
   walk(data);
 
   const seen = new Set<string>();
-  return out.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+
+  return out.filter((r) =>
+    seen.has(r.id) ? false : (seen.add(r.id), true),
+  );
 }
 
 export function extractVideoId(input: string): string | null {
   const raw = input.trim();
+
   if (/^[\w-]{11}$/.test(raw)) return raw;
+
   try {
     const url = new URL(raw);
+
     if (url.hostname.includes("youtu.be")) {
       const id = url.pathname.slice(1).split("/")[0];
       return id && /^[\w-]{11}$/.test(id) ? id : null;
     }
+
     const v = url.searchParams.get("v");
+
     if (v && /^[\w-]{11}$/.test(v)) return v;
+
     const parts = url.pathname.split("/");
     const last = parts[parts.length - 1];
+
     return last && /^[\w-]{11}$/.test(last) ? last : null;
   } catch {
     return null;
   }
 }
 
-export async function ytSearch(q: string): Promise<{ results: MediaResult[]; error?: string }> {
+export async function ytSearch(
+  q: string,
+): Promise<{ results: MediaResult[]; error?: string }> {
   const apiKey = process.env["YOUTUBE_API_KEY"];
+
   if (apiKey) {
-    const url = new URL("https://www.googleapis.com/youtube/v3/search");
+    const url = new URL(
+      "https://www.googleapis.com/youtube/v3/search",
+    );
+
     url.searchParams.set("part", "snippet");
     url.searchParams.set("type", "video");
     url.searchParams.set("videoEmbeddable", "true");
     url.searchParams.set("maxResults", "25");
     url.searchParams.set("q", q);
     url.searchParams.set("key", apiKey);
+
     try {
       const res = await fetch(url);
+
       if (res.ok) {
         const json = (await res.json()) as {
           items?: Array<{
@@ -107,10 +137,15 @@ export async function ytSearch(q: string): Promise<{ results: MediaResult[]; err
             snippet?: {
               title?: string;
               channelTitle?: string;
-              thumbnails?: { high?: { url?: string } };
+              thumbnails?: {
+                high?: {
+                  url?: string;
+                };
+              };
             };
           }>;
         };
+
         const results = (json.items ?? [])
           .filter((i) => i.id?.videoId)
           .map((i) => ({
@@ -121,15 +156,21 @@ export async function ytSearch(q: string): Promise<{ results: MediaResult[]; err
               i.snippet?.thumbnails?.high?.url ??
               `https://i.ytimg.com/vi/${i.id!.videoId!}/hqdefault.jpg`,
           }));
-        if (results.length) return { results };
+
+        if (results.length) {
+          return { results };
+        }
       }
     } catch {
-      /* fall through to scrape */
+      // Fall through to other search methods.
     }
   }
 
   const inner = await innertubeSearch(q);
-  if (inner.length) return { results: inner };
+
+  if (inner.length) {
+    return { results: inner };
+  }
 
   try {
     const res = await fetch(
@@ -137,21 +178,40 @@ export async function ytSearch(q: string): Promise<{ results: MediaResult[]; err
       {
         headers: {
           "user-agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
           "accept-language": "en-US,en;q=0.9",
         },
       },
     );
-    if (!res.ok) return { results: [], error: "Search is unavailable right now." };
+
+    if (!res.ok) {
+      return {
+        results: [],
+        error: "Search is unavailable right now.",
+      };
+    }
+
     const results = scrape(await res.text());
-    if (!results.length) return { results: [], error: "No results found." };
+
+    if (!results.length) {
+      return {
+        results: [],
+        error: "No results found.",
+      };
+    }
+
     return { results };
   } catch {
-    return { results: [], error: "Search is unavailable right now." };
+    return {
+      results: [],
+      error: "Search is unavailable right now.",
+    };
   }
 }
 
-/** Keyless YouTube search through the public innertube endpoint (most reliable from servers). */
+/**
+ * Keyless YouTube search through the public Innertube endpoint.
+ */
 async function innertubeSearch(q: string): Promise<MediaResult[]> {
   try {
     const res = await fetch(
@@ -161,7 +221,7 @@ async function innertubeSearch(q: string): Promise<MediaResult[]> {
         headers: {
           "content-type": "application/json",
           "user-agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
         },
         body: JSON.stringify({
           query: q,
@@ -177,46 +237,79 @@ async function innertubeSearch(q: string): Promise<MediaResult[]> {
         }),
       },
     );
+
     if (!res.ok) return [];
+
     const json = (await res.json()) as unknown;
     const out: MediaResult[] = [];
+
     const walk = (node: unknown) => {
-      if (out.length >= 30 || !node || typeof node !== "object") return;
+      if (
+        out.length >= 30 ||
+        !node ||
+        typeof node !== "object"
+      ) {
+        return;
+      }
+
       if (Array.isArray(node)) {
         node.forEach(walk);
         return;
       }
+
       const vr = (node as YtRenderer).videoRenderer;
+
       if (vr?.videoId) {
         const title = vr.title?.runs?.[0]?.text;
+
         if (title) {
           out.push({
             id: vr.videoId,
             title,
-            channel: vr.ownerText?.runs?.[0]?.text ?? "YouTube",
+            channel:
+              vr.ownerText?.runs?.[0]?.text ?? "YouTube",
             thumbnail: `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`,
-            ...(vr.lengthText?.simpleText ? { duration: vr.lengthText.simpleText } : {}),
+            ...(vr.lengthText?.simpleText
+              ? { duration: vr.lengthText.simpleText }
+              : {}),
           });
         }
       }
-      Object.values(node as Record<string, unknown>).forEach(walk);
+
+      Object.values(
+        node as Record<string, unknown>,
+      ).forEach(walk);
     };
+
     walk(json);
+
     const seen = new Set<string>();
-    return out.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+
+    return out.filter((r) =>
+      seen.has(r.id)
+        ? false
+        : (seen.add(r.id), true),
+    );
   } catch {
     return [];
   }
 }
 
-
-export async function ytMeta(videoId: string): Promise<MediaResult | null> {
+export async function ytMeta(
+  videoId: string,
+): Promise<MediaResult | null> {
   try {
     const res = await fetch(
       `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
     );
+
     if (!res.ok) return null;
-    const json = (await res.json()) as { title?: string; author_name?: string };
+
+    const json = (await res.json()) as {
+      title?: string;
+      author_name?: string;
+    };
+
     return {
       id: videoId,
       title: json.title ?? videoId,
@@ -228,27 +321,72 @@ export async function ytMeta(videoId: string): Promise<MediaResult | null> {
   }
 }
 
+/**
+ * Local yt-dlp is now allowed when explicitly enabled.
+ *
+ * This works both locally and inside the Vercel container,
+ * provided yt-dlp is installed in that runtime.
+ */
 function localDownloaderEnabled(): boolean {
-  const configured = process.env["DOWNLOAD_LOCAL_ENABLED"]?.trim().toLowerCase();
-  if (configured === "false" || configured === "0") return false;
-  if (configured === "true" || configured === "1") return true;
-  return !process.env["VERCEL"];
+  const configured = process.env["DOWNLOAD_LOCAL_ENABLED"]
+    ?.trim()
+    .toLowerCase();
+
+  if (configured === "false" || configured === "0") {
+    return false;
+  }
+
+  if (configured === "true" || configured === "1") {
+    return true;
+  }
+
+  // Default to enabled.
+  return true;
 }
 
-/** A remote provider is optional; non-Vercel runtimes can use local yt-dlp. */
 export function providerConfigured(): boolean {
-  return Boolean(process.env["DOWNLOAD_API_URL"]) || localDownloaderEnabled();
+  return Boolean(process.env["DOWNLOAD_API_URL"]) ||
+    localDownloaderEnabled();
 }
 
-async function fetchLocalMedia(videoId: string, type: "audio" | "video"): Promise<Response | null> {
-  const directory = await mkdtemp(join(tmpdir(), "aurora-media-"));
-  const output = join(directory, "media.%(ext)s");
-  const target = `https://www.youtube.com/watch?v=${videoId}`;
+/**
+ * Find the yt-dlp executable.
+ *
+ * On our Vercel container it will be installed globally
+ * and available as "yt-dlp".
+ */
+function getYtDlpCommand(): {
+  command: string;
+  prefixArgs: string[];
+} {
+  return {
+    command: process.env["YT_DLP_PATH"]?.trim() || "yt-dlp",
+    prefixArgs: [],
+  };
+}
+
+async function fetchLocalMedia(
+  videoId: string,
+  type: "audio" | "video",
+): Promise<Response | null> {
+  const directory = await mkdtemp(
+    join(tmpdir(), "aurora-media-"),
+  );
+
+  const output = join(
+    directory,
+    "media.%(ext)s",
+  );
+
+  const target =
+    `https://www.youtube.com/watch?v=${videoId}`;
+
+  const yt = getYtDlpCommand();
+
   const args =
     type === "audio"
       ? [
-          "run",
-          "yt-dlp",
+          ...yt.prefixArgs,
           "--no-playlist",
           "--no-progress",
           "--no-warnings",
@@ -262,8 +400,7 @@ async function fetchLocalMedia(videoId: string, type: "audio" | "video"): Promis
           target,
         ]
       : [
-          "run",
-          "yt-dlp",
+          ...yt.prefixArgs,
           "--no-playlist",
           "--no-progress",
           "--no-warnings",
@@ -278,70 +415,211 @@ async function fetchLocalMedia(videoId: string, type: "audio" | "video"): Promis
 
   try {
     const stderr: Buffer[] = [];
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn("uv", args, { stdio: ["ignore", "ignore", "pipe"] });
-      child.stderr.on("data", (chunk: Buffer) => {
-        if (stderr.reduce((total, part) => total + part.length, 0) < 16_384) stderr.push(chunk);
-      });
-      child.once("error", reject);
-      child.once("close", resolve);
-    });
+
+    const exitCode = await new Promise<number | null>(
+      (resolve, reject) => {
+        const child = spawn(
+          yt.command,
+          args,
+          {
+            stdio: [
+              "ignore",
+              "ignore",
+              "pipe",
+            ],
+          },
+        );
+
+        child.stderr.on(
+          "data",
+          (chunk: Buffer) => {
+            if (
+              stderr.reduce(
+                (total, part) =>
+                  total + part.length,
+                0,
+              ) < 16_384
+            ) {
+              stderr.push(chunk);
+            }
+          },
+        );
+
+        child.once("error", reject);
+        child.once("close", resolve);
+      },
+    );
+
     if (exitCode !== 0) {
-      console.error(`[media] yt-dlp failed (${exitCode}): ${Buffer.concat(stderr).toString("utf8")}`);
-      await rm(directory, { recursive: true, force: true });
+      console.error(
+        `[media] yt-dlp failed (${exitCode}):`,
+        Buffer.concat(stderr).toString("utf8"),
+      );
+
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
+
       return null;
     }
 
-    const fileName = (await readdir(directory)).find((name) => name.startsWith("media."));
+    const fileName = (
+      await readdir(directory)
+    ).find((name) =>
+      name.startsWith("media."),
+    );
+
     if (!fileName) {
-      await rm(directory, { recursive: true, force: true });
+      console.error(
+        "[media] yt-dlp completed but no media file was created.",
+      );
+
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
+
       return null;
     }
-    const filePath = join(directory, fileName);
+
+    const filePath = join(
+      directory,
+      fileName,
+    );
+
     const fileStat = await stat(filePath);
     const stream = createReadStream(filePath);
-    const cleanup = () => void rm(directory, { recursive: true, force: true });
+
+    const cleanup = () =>
+      void rm(directory, {
+        recursive: true,
+        force: true,
+      });
+
     stream.once("close", cleanup);
     stream.once("error", cleanup);
 
-    return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
-      headers: {
-        "content-type": type === "audio" ? "audio/mpeg" : "video/mp4",
-        "content-length": String(fileStat.size),
+    return new Response(
+      Readable.toWeb(stream) as unknown as BodyInit,
+      {
+        headers: {
+          "content-type":
+            type === "audio"
+              ? "audio/mpeg"
+              : "video/mp4",
+
+          "content-length":
+            String(fileStat.size),
+
+          "cache-control":
+            "no-store, no-cache, must-revalidate",
+        },
       },
-    });
+    );
   } catch (error) {
-    console.error("[media] Local downloader failed:", error);
-    await rm(directory, { recursive: true, force: true });
+    console.error(
+      "[media] Local downloader failed:",
+      error,
+    );
+
+    await rm(directory, {
+      recursive: true,
+      force: true,
+    });
+
     return null;
   }
 }
 
 /**
- * Streams the media file from the configured upstream provider.
- * Returns null when the provider is missing or fails.
+ * Streams media using either:
+ *
+ * 1. DOWNLOAD_API_URL if configured
+ * 2. Local yt-dlp otherwise
  */
 export async function fetchMedia(
   videoId: string,
   type: "audio" | "video",
 ): Promise<Response | null> {
-  const base = process.env["DOWNLOAD_API_URL"];
-  if (!base) return localDownloaderEnabled() ? fetchLocalMedia(videoId, type) : null;
-  const key = process.env["DOWNLOAD_API_KEY"] ?? "";
-  const url = new URL("/download", base.startsWith("http") ? base : `https://${base}`);
-  url.searchParams.set("url", videoId);
-  url.searchParams.set("type", type);
-  if (key) url.searchParams.set("api_key", key);
-  try {
-    const res = await fetch(url, { headers: { accept: "*/*" } });
-    if (!res.ok || !res.body) return null;
-    return res;
-  } catch {
-    return null;
+  const base =
+    process.env["DOWNLOAD_API_URL"];
+
+  // External provider remains supported.
+  if (base) {
+    const key =
+      process.env["DOWNLOAD_API_KEY"] ?? "";
+
+    const url = new URL(
+      "/download",
+      base.startsWith("http")
+        ? base
+        : `https://${base}`,
+    );
+
+    url.searchParams.set(
+      "url",
+      videoId,
+    );
+
+    url.searchParams.set(
+      "type",
+      type,
+    );
+
+    if (key) {
+      url.searchParams.set(
+        "api_key",
+        key,
+      );
+    }
+
+    try {
+      const res = await fetch(
+        url,
+        {
+          headers: {
+            accept: "*/*",
+          },
+        },
+      );
+
+      if (res.ok && res.body) {
+        return res;
+      }
+
+      console.error(
+        `[media] External provider returned ${res.status}`,
+      );
+    } catch (error) {
+      console.error(
+        "[media] External provider failed:",
+        error,
+      );
+    }
   }
+
+  // Fall back to local yt-dlp.
+  if (localDownloaderEnabled()) {
+    return fetchLocalMedia(
+      videoId,
+      type,
+    );
+  }
+
+  return null;
 }
 
-export function safeFileName(title: string, ext: string): string {
-  const clean = title.replace(/[^\w\s.-]/g, "").trim().slice(0, 80) || "track";
+export function safeFileName(
+  title: string,
+  ext: string,
+): string {
+  const clean =
+    title
+      .replace(/[^\w\s.-]/g, "")
+      .trim()
+      .slice(0, 80) ||
+    "track";
+
   return `${clean}.${ext}`;
 }
