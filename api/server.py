@@ -59,10 +59,6 @@ def send_json(handler, status, data):
 # =========================================================
 
 def safe_filename(filename, extension):
-    """
-    Create a safe filename for filesystem/header use.
-    """
-
     filename = os.path.basename(filename)
 
     filename = re.sub(
@@ -89,10 +85,6 @@ def safe_filename(filename, extension):
 
 
 def ascii_filename(filename, extension):
-    """
-    Create an ASCII-only fallback filename.
-    """
-
     name_without_extension = os.path.splitext(filename)[0]
 
     ascii_name = (
@@ -124,13 +116,6 @@ def ascii_filename(filename, extension):
 # =========================================================
 
 def extract_path_video_id(path):
-    """
-    Supports:
-
-        /api/download/<video_id>
-        /api/download/<video_id>/
-    """
-
     prefix = "/api/download/"
 
     if not path.startswith(prefix):
@@ -149,10 +134,6 @@ def extract_path_video_id(path):
 # =========================================================
 
 def create_cookie_file(temp_dir):
-    """
-    Decode YOUTUBE_COOKIES_B64 into a temporary
-    Netscape cookies.txt file.
-    """
 
     if not YOUTUBE_COOKIES_B64:
         return None
@@ -163,23 +144,30 @@ def create_cookie_file(temp_dir):
     )
 
     try:
+
         cookie_bytes = base64.b64decode(
             YOUTUBE_COOKIES_B64,
             validate=True
         )
 
         if not cookie_bytes:
-            raise ValueError("Cookie data is empty")
+            raise ValueError(
+                "Cookie data is empty"
+            )
 
         with open(
             cookies_file,
             "wb"
         ) as cookie_handle:
-            cookie_handle.write(cookie_bytes)
+
+            cookie_handle.write(
+                cookie_bytes
+            )
 
         return cookies_file
 
     except Exception as exc:
+
         print(
             "Failed to prepare YouTube cookies:",
             repr(exc),
@@ -195,9 +183,10 @@ def create_cookie_file(temp_dir):
 
 class DownloadHandler(BaseHTTPRequestHandler):
 
-    server_version = "AuroraDownloader/1.0"
+    server_version = "AuroraDownloader/2.0"
 
     def log_message(self, format, *args):
+
         print(
             format % args,
             flush=True
@@ -205,14 +194,20 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
-        parsed = urllib.parse.urlparse(self.path)
+        parsed = urllib.parse.urlparse(
+            self.path
+        )
+
         path = parsed.path
 
         # =====================================================
         # HEALTH CHECK
         # =====================================================
 
-        if path == "/health":
+        if path in (
+            "/health",
+            "/api/download/health"
+        ):
 
             send_json(
                 self,
@@ -220,9 +215,22 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "service": "aurora-download",
-                    "yt_dlp": shutil.which("yt-dlp") is not None,
-                    "ffmpeg": shutil.which("ffmpeg") is not None,
-                    "deno": shutil.which("deno") is not None,
+
+                    "yt_dlp": (
+                        shutil.which("yt-dlp")
+                        is not None
+                    ),
+
+                    "ffmpeg": (
+                        shutil.which("ffmpeg")
+                        is not None
+                    ),
+
+                    "deno": (
+                        shutil.which("deno")
+                        is not None
+                    ),
+
                     "cookies_configured": bool(
                         YOUTUBE_COOKIES_B64
                     )
@@ -238,7 +246,12 @@ class DownloadHandler(BaseHTTPRequestHandler):
         valid_download_path = (
             path == "/download"
             or path == "/download/"
-            or path.startswith("/api/download/")
+            or (
+                path.startswith(
+                    "/api/download/"
+                )
+                and path != "/api/download/health"
+            )
         )
 
         if not valid_download_path:
@@ -305,11 +318,12 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
         if not video_id and not youtube_url:
 
-            path_video_id = extract_path_video_id(
-                path
+            path_video_id = (
+                extract_path_video_id(path)
             )
 
             if path_video_id:
+
                 video_id = path_video_id
 
         # =====================================================
@@ -322,7 +336,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 self,
                 400,
                 {
-                    "error": "Missing video id or URL"
+                    "error": (
+                        "Missing video id or URL"
+                    )
                 }
             )
 
@@ -337,7 +353,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 self,
                 400,
                 {
-                    "error": "type must be audio or video"
+                    "error": (
+                        "type must be audio or video"
+                    )
                 }
             )
 
@@ -368,15 +386,15 @@ class DownloadHandler(BaseHTTPRequestHandler):
         try:
 
             # =================================================
-            # PREPARE COOKIES
+            # COOKIES
             # =================================================
 
-            cookies_file = create_cookie_file(
-                temp_dir
+            cookies_file = (
+                create_cookie_file(temp_dir)
             )
 
             # =================================================
-            # OUTPUT TEMPLATE
+            # OUTPUT
             # =================================================
 
             output_template = os.path.join(
@@ -389,18 +407,22 @@ class DownloadHandler(BaseHTTPRequestHandler):
             # =================================================
 
             youtube_options = [
+
                 "--no-playlist",
 
-                # Explicitly enable Deno.
+                # Explicit Deno runtime.
                 "--js-runtimes",
                 "deno",
 
+                # Important:
                 # Avoid the problematic logged-in
                 # tv_downgraded client.
                 "--extractor-args",
-                "youtube:player_client=default,-tv_downgraded,web_embedded",
+                "youtube:player_client=default,web_embedded",
 
-                # Use the cookies only when configured.
+                "--no-warnings",
+
+                "--no-progress",
             ]
 
             # =================================================
@@ -410,13 +432,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
             if media_type == "audio":
 
                 command = [
+
                     "yt-dlp",
 
                     *youtube_options,
-
-                    "--no-warnings",
-
-                    "--no-progress",
 
                     "--extract-audio",
 
@@ -444,7 +463,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 )
 
                 expected_extension = ".mp3"
-                content_type = "audio/mpeg"
+
+                content_type = (
+                    "audio/mpeg"
+                )
 
             # =================================================
             # VIDEO
@@ -453,13 +475,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
             else:
 
                 command = [
+
                     "yt-dlp",
 
                     *youtube_options,
-
-                    "--no-warnings",
-
-                    "--no-progress",
 
                     "--merge-output-format",
                     "mp4",
@@ -482,36 +501,88 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 )
 
                 expected_extension = ".mp4"
-                content_type = "video/mp4"
+
+                content_type = (
+                    "video/mp4"
+                )
 
             # =================================================
-            # LOG
+            # LOGGING
             # =================================================
 
             print(
-                "Starting yt-dlp for:",
+                "========================================",
+                flush=True
+            )
+
+            print(
+                "Aurora download request",
+                flush=True
+            )
+
+            print(
+                "URL:",
                 youtube_url,
                 flush=True
             )
 
             print(
-                "YouTube cookies:",
-                "enabled" if cookies_file else "disabled",
+                "Type:",
+                media_type,
+                flush=True
+            )
+
+            print(
+                "yt-dlp:",
+                shutil.which("yt-dlp")
+                or "NOT FOUND",
+                flush=True
+            )
+
+            print(
+                "ffmpeg:",
+                shutil.which("ffmpeg")
+                or "NOT FOUND",
                 flush=True
             )
 
             print(
                 "Deno:",
-                shutil.which("deno") or "NOT FOUND",
+                shutil.which("deno")
+                or "NOT FOUND",
                 flush=True
             )
 
             print(
-                "yt-dlp command:",
-                " ".join(command).replace(
-                    cookies_file or "__NO_COOKIE__",
+                "Cookies:",
+                "enabled"
+                if cookies_file
+                else "disabled",
+                flush=True
+            )
+
+            safe_command = [
+                str(x)
+                for x in command
+            ]
+
+            if cookies_file:
+
+                safe_command = [
                     "<cookies>"
-                ),
+                    if x == cookies_file
+                    else x
+                    for x in safe_command
+                ]
+
+            print(
+                "Command:",
+                " ".join(safe_command),
+                flush=True
+            )
+
+            print(
+                "========================================",
                 flush=True
             )
 
@@ -527,14 +598,14 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
 
             # =================================================
-            # LOG YT-DLP OUTPUT
+            # OUTPUT LOGS
             # =================================================
 
             if result.stdout.strip():
 
                 print(
                     "yt-dlp stdout:",
-                    result.stdout[-6000:],
+                    result.stdout[-8000:],
                     flush=True
                 )
 
@@ -542,12 +613,12 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
                 print(
                     "yt-dlp stderr:",
-                    result.stderr[-6000:],
+                    result.stderr[-8000:],
                     flush=True
                 )
 
             # =================================================
-            # ERROR
+            # FAILURE
             # =================================================
 
             if result.returncode != 0:
@@ -568,15 +639,17 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     self,
                     502,
                     {
-                        "error": "yt-dlp download failed",
-                        "details": details[-4000:]
+                        "error": (
+                            "yt-dlp download failed"
+                        ),
+                        "details": details[-6000:]
                     }
                 )
 
                 return
 
             # =================================================
-            # FIND OUTPUT
+            # FIND OUTPUT FILE
             # =================================================
 
             files = []
@@ -627,7 +700,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
             if matching_files:
 
-                file_path = matching_files[0]
+                file_path = (
+                    matching_files[0]
+                )
 
             else:
 
@@ -637,8 +712,8 @@ class DownloadHandler(BaseHTTPRequestHandler):
             # FILE INFORMATION
             # =================================================
 
-            original_filename = os.path.basename(
-                file_path
+            original_filename = (
+                os.path.basename(file_path)
             )
 
             filename = safe_filename(
@@ -646,9 +721,11 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 expected_extension
             )
 
-            fallback_filename = ascii_filename(
-                filename,
-                expected_extension
+            fallback_filename = (
+                ascii_filename(
+                    filename,
+                    expected_extension
+                )
             )
 
             encoded_filename = quote(
@@ -666,14 +743,17 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     self,
                     502,
                     {
-                        "error": "Downloaded file is empty"
+                        "error": (
+                            "Downloaded file "
+                            "is empty"
+                        )
                     }
                 )
 
                 return
 
             # =================================================
-            # SEND RESPONSE
+            # RESPONSE
             # =================================================
 
             self.send_response(200)
@@ -710,7 +790,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
             # =================================================
-            # STREAM FILE
+            # STREAM
             # =================================================
 
             with open(
@@ -744,7 +824,8 @@ class DownloadHandler(BaseHTTPRequestHandler):
                         break
 
             print(
-                f"Download completed: {filename}",
+                "Download completed:",
+                filename,
                 flush=True
             )
 
@@ -763,7 +844,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 self,
                 504,
                 {
-                    "error": "Download timed out"
+                    "error": (
+                        "Download timed out"
+                    )
                 }
             )
 
@@ -774,7 +857,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
         except BrokenPipeError:
 
             print(
-                "Client disconnected during download",
+                "Client disconnected",
                 flush=True
             )
 
@@ -796,7 +879,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     self,
                     500,
                     {
-                        "error": "Internal download error",
+                        "error": (
+                            "Internal download error"
+                        ),
                         "details": str(exc)
                     }
                 )
@@ -828,32 +913,52 @@ def main():
     )
 
     print(
-        f"Aurora downloader listening on "
-        f"0.0.0.0:{PORT}",
+        "========================================",
+        flush=True
+    )
+
+    print(
+        "Aurora downloader starting",
+        flush=True
+    )
+
+    print(
+        "Port:",
+        PORT,
         flush=True
     )
 
     print(
         "yt-dlp:",
-        shutil.which("yt-dlp") or "NOT FOUND",
+        shutil.which("yt-dlp")
+        or "NOT FOUND",
         flush=True
     )
 
     print(
         "ffmpeg:",
-        shutil.which("ffmpeg") or "NOT FOUND",
+        shutil.which("ffmpeg")
+        or "NOT FOUND",
         flush=True
     )
 
     print(
         "deno:",
-        shutil.which("deno") or "NOT FOUND",
+        shutil.which("deno")
+        or "NOT FOUND",
         flush=True
     )
 
     print(
         "cookies:",
-        "configured" if YOUTUBE_COOKIES_B64 else "NOT CONFIGURED",
+        "configured"
+        if YOUTUBE_COOKIES_B64
+        else "NOT CONFIGURED",
+        flush=True
+    )
+
+    print(
+        "========================================",
         flush=True
     )
 
