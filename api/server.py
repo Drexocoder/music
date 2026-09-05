@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -10,6 +11,7 @@ from urllib.parse import quote
 
 
 API_KEY = os.environ.get("DOWNLOAD_API_KEY", "")
+YOUTUBE_COOKIES_B64 = os.environ.get("YOUTUBE_COOKIES_B64", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
 
@@ -17,9 +19,18 @@ def send_json(handler, status, data):
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
     handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Cache-Control", "no-store")
+    handler.send_header(
+        "Content-Type",
+        "application/json; charset=utf-8",
+    )
+    handler.send_header(
+        "Content-Length",
+        str(len(body)),
+    )
+    handler.send_header(
+        "Cache-Control",
+        "no-store",
+    )
     handler.end_headers()
 
     try:
@@ -34,7 +45,12 @@ def safe_filename(filename, extension):
     """
     filename = os.path.basename(filename)
 
-    filename = re.sub(r"[\r\n\t]", " ", filename)
+    filename = re.sub(
+        r"[\r\n\t]",
+        " ",
+        filename,
+    )
+
     filename = re.sub(
         r'[<>:"/\\|?*\x00-\x1f]',
         "_",
@@ -106,12 +122,57 @@ def extract_path_video_id(path):
     return urllib.parse.unquote(video_id).strip()
 
 
+def create_cookie_file(temp_dir):
+    """
+    Decode the Vercel environment variable into a temporary
+    Netscape cookies.txt file.
+
+    The file exists only during this download request and is
+    deleted when the request finishes.
+    """
+    if not YOUTUBE_COOKIES_B64:
+        return None
+
+    cookies_file = os.path.join(
+        temp_dir,
+        "cookies.txt",
+    )
+
+    try:
+        cookie_bytes = base64.b64decode(
+            YOUTUBE_COOKIES_B64,
+            validate=True,
+        )
+
+        if not cookie_bytes:
+            raise ValueError("Cookie data is empty")
+
+        with open(
+            cookies_file,
+            "wb",
+        ) as cookie_handle:
+            cookie_handle.write(cookie_bytes)
+
+        return cookies_file
+
+    except Exception as exc:
+        print(
+            "Failed to prepare YouTube cookies:",
+            repr(exc),
+            flush=True,
+        )
+        return None
+
+
 class DownloadHandler(BaseHTTPRequestHandler):
 
     server_version = "AuroraDownloader/1.0"
 
     def log_message(self, format, *args):
-        print(format % args, flush=True)
+        print(
+            format % args,
+            flush=True,
+        )
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -130,6 +191,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     "service": "aurora-download",
                     "yt_dlp": shutil.which("yt-dlp") is not None,
                     "ffmpeg": shutil.which("ffmpeg") is not None,
+                    "cookies_configured": bool(
+                        YOUTUBE_COOKIES_B64
+                    ),
                 },
             )
             return
@@ -159,7 +223,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
         # =========================================================
 
         if API_KEY:
-            supplied_key = self.headers.get("x-api-key", "")
+            supplied_key = self.headers.get(
+                "x-api-key",
+                "",
+            )
 
             if supplied_key != API_KEY:
                 send_json(
@@ -175,18 +242,33 @@ class DownloadHandler(BaseHTTPRequestHandler):
         # QUERY PARAMETERS
         # =========================================================
 
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(
+            parsed.query,
+        )
 
-        video_id = query.get("id", [""])[0].strip()
-        youtube_url = query.get("url", [""])[0].strip()
-        media_type = query.get("type", ["audio"])[0].lower().strip()
+        video_id = query.get(
+            "id",
+            [""],
+        )[0].strip()
+
+        youtube_url = query.get(
+            "url",
+            [""],
+        )[0].strip()
+
+        media_type = query.get(
+            "type",
+            ["audio"],
+        )[0].lower().strip()
 
         # =========================================================
         # SUPPORT /api/download/<VIDEO_ID>
         # =========================================================
 
         if not video_id and not youtube_url:
-            path_video_id = extract_path_video_id(path)
+            path_video_id = extract_path_video_id(
+                path,
+            )
 
             if path_video_id:
                 video_id = path_video_id
@@ -205,7 +287,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if media_type not in ("audio", "video"):
+        if media_type not in (
+            "audio",
+            "video",
+        ):
             send_json(
                 self,
                 400,
@@ -222,7 +307,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
         if video_id:
             youtube_url = (
                 "https://www.youtube.com/watch?v="
-                + urllib.parse.quote(video_id, safe="")
+                + urllib.parse.quote(
+                    video_id,
+                    safe="",
+                )
             )
 
         # =========================================================
@@ -230,10 +318,23 @@ class DownloadHandler(BaseHTTPRequestHandler):
         # =========================================================
 
         temp_dir = tempfile.mkdtemp(
-            prefix="aurora-"
+            prefix="aurora-",
         )
 
         try:
+
+            # =====================================================
+            # PREPARE COOKIES
+            # =====================================================
+
+            cookies_file = create_cookie_file(
+                temp_dir,
+            )
+
+            # =====================================================
+            # OUTPUT TEMPLATE
+            # =====================================================
+
             output_template = os.path.join(
                 temp_dir,
                 "%(title).120s.%(ext)s",
@@ -247,18 +348,37 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
                 command = [
                     "yt-dlp",
+
                     "--no-playlist",
+
                     "--no-warnings",
+
                     "--no-progress",
+
                     "--extract-audio",
+
                     "--audio-format",
                     "mp3",
+
                     "--audio-quality",
                     "5",
+
                     "--output",
                     output_template,
-                    youtube_url,
                 ]
+
+                # Add cookies only when configured.
+                if cookies_file:
+                    command.extend(
+                        [
+                            "--cookies",
+                            cookies_file,
+                        ]
+                    )
+
+                command.append(
+                    youtube_url,
+                )
 
                 expected_extension = ".mp3"
                 content_type = "audio/mpeg"
@@ -271,22 +391,49 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
                 command = [
                     "yt-dlp",
+
                     "--no-playlist",
+
                     "--no-warnings",
+
                     "--no-progress",
+
                     "--merge-output-format",
                     "mp4",
+
                     "--output",
                     output_template,
-                    youtube_url,
                 ]
+
+                # Add cookies only when configured.
+                if cookies_file:
+                    command.extend(
+                        [
+                            "--cookies",
+                            cookies_file,
+                        ]
+                    )
+
+                command.append(
+                    youtube_url,
+                )
 
                 expected_extension = ".mp4"
                 content_type = "video/mp4"
 
+            # =====================================================
+            # LOG
+            # =====================================================
+
             print(
                 "Starting yt-dlp for:",
                 youtube_url,
+                flush=True,
+            )
+
+            print(
+                "YouTube cookies:",
+                "enabled" if cookies_file else "disabled",
                 flush=True,
             )
 
@@ -300,6 +447,10 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 text=True,
                 timeout=1500,
             )
+
+            # =====================================================
+            # YT-DLP ERROR
+            # =====================================================
 
             if result.returncode != 0:
 
@@ -323,6 +474,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
                         "details": details[-4000:],
                     },
                 )
+
                 return
 
             # =====================================================
@@ -331,15 +483,21 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
             files = []
 
-            for filename in os.listdir(temp_dir):
+            for filename in os.listdir(
+                temp_dir,
+            ):
 
                 file_path = os.path.join(
                     temp_dir,
                     filename,
                 )
 
-                if os.path.isfile(file_path):
-                    files.append(file_path)
+                if os.path.isfile(
+                    file_path,
+                ):
+                    files.append(
+                        file_path,
+                    )
 
             if not files:
 
@@ -353,13 +511,18 @@ class DownloadHandler(BaseHTTPRequestHandler):
                         ),
                     },
                 )
+
                 return
+
+            # =====================================================
+            # SELECT OUTPUT FILE
+            # =====================================================
 
             matching_files = [
                 file_path
                 for file_path in files
                 if file_path.lower().endswith(
-                    expected_extension.lower()
+                    expected_extension.lower(),
                 )
             ]
 
@@ -373,7 +536,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
             # =====================================================
 
             original_filename = os.path.basename(
-                file_path
+                file_path,
             )
 
             filename = safe_filename(
@@ -392,7 +555,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
 
             file_size = os.path.getsize(
-                file_path
+                file_path,
             )
 
             if file_size <= 0:
@@ -404,6 +567,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
                         "error": "Downloaded file is empty",
                     },
                 )
+
                 return
 
             # =====================================================
@@ -417,18 +581,11 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 content_type,
             )
 
-            # IMPORTANT:
-            #
-            # filename= is ASCII-only because Python's
-            # BaseHTTPRequestHandler uses Latin-1 for headers.
-            #
-            # filename*= contains the real UTF-8 filename.
-            #
-
+            # ASCII fallback + UTF-8 filename.
             self.send_header(
                 "Content-Disposition",
                 (
-                    f'attachment; '
+                    "attachment; "
                     f'filename="{fallback_filename}"; '
                     f"filename*=UTF-8''{encoded_filename}"
                 ),
@@ -455,26 +612,34 @@ class DownloadHandler(BaseHTTPRequestHandler):
             # STREAM FILE
             # =====================================================
 
-            with open(file_path, "rb") as file:
+            with open(
+                file_path,
+                "rb",
+            ) as file:
 
                 while True:
 
                     chunk = file.read(
-                        1024 * 1024
+                        1024 * 1024,
                     )
 
                     if not chunk:
                         break
 
                     try:
-                        self.wfile.write(chunk)
+
+                        self.wfile.write(
+                            chunk,
+                        )
 
                     except BrokenPipeError:
+
                         print(
                             "Client disconnected "
                             "during download",
                             flush=True,
                         )
+
                         break
 
             print(
@@ -525,6 +690,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
 
             try:
+
                 send_json(
                     self,
                     500,
@@ -533,6 +699,7 @@ class DownloadHandler(BaseHTTPRequestHandler):
                         "details": str(exc),
                     },
                 )
+
             except Exception:
                 pass
 
