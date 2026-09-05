@@ -3,7 +3,7 @@
 import { createHash } from "crypto";
 
 function botToken(): string {
-  const token = process.env["TELEGRAM_BOT_TOKEN"] ?? process.env["TELEGRAM_API_KEY"];
+  const token = (process.env["TELEGRAM_BOT_TOKEN"] ?? process.env["TELEGRAM_API_KEY"])?.trim();
   if (!token) {
     throw new Error("Missing TELEGRAM_BOT_TOKEN environment variable.");
   }
