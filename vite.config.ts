@@ -11,6 +11,18 @@ export default defineConfig({
     server: {
       // Replit's preview proxy uses a generated host for each workspace.
       allowedHosts: true,
+      // Keep the browser on one origin while the Replit development workflow
+      // runs the yt-dlp service on its private local port.
+      proxy: {
+        "/api/download": {
+          target: "http://127.0.0.1:8080",
+          changeOrigin: true,
+        },
+        "/health": {
+          target: "http://127.0.0.1:8080",
+          changeOrigin: true,
+        },
+      },
     },
   },
   // Vercel needs a Node-compatible serverless output instead of the wrapper's

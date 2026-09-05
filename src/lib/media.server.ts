@@ -405,14 +405,6 @@ export async function ytMeta(
   }
 }
 
-/**
- * Local downloader is enabled by default.
- *
- * IMPORTANT:
- * The actual Vercel download implementation
- * will be connected separately through the
- * Python yt-dlp function.
- */
 function localDownloaderEnabled(): boolean {
   const configured =
     process.env["DOWNLOAD_LOCAL_ENABLED"]
@@ -438,48 +430,30 @@ export function providerConfigured(): boolean {
   );
 }
 
-/**
- * Temporary placeholder.
- *
- * We intentionally do NOT import
- * youtube-dl-exec anymore.
- *
- * Vercel's Python function will handle
- * yt-dlp downloads.
- */
 async function fetchLocalMedia(
-  _videoId: string,
-  _type: "audio" | "video",
-): Promise<Response | null> {
-  console.error(
-    "[media] Local yt-dlp downloader is handled by the Python Vercel function.",
-  );
-
-  return null;
-}
-
-/**
- * Download media.
- *
- * Priority:
- * 1. DOWNLOAD_API_URL if configured.
- * 2. Python yt-dlp Vercel function.
- */
-export async function fetchMedia(
   videoId: string,
   type: "audio" | "video",
 ): Promise<Response | null> {
-  const base =
-    process.env["DOWNLOAD_API_URL"];
+  if (!localDownloaderEnabled()) {
+    return null;
+  }
 
-  /*
-   * Keep the existing external-provider
-   * fallback if one is configured.
-   */
-  if (base) {
-    const key =
-      process.env["DOWNLOAD_API_KEY"] ?? "";
+  return fetchDownloader(
+    "http://127.0.0.1:8080",
+    videoId,
+    type,
+  );
+}
 
+async function fetchDownloader(
+  base: string,
+  videoId: string,
+  type: "audio" | "video",
+): Promise<Response | null> {
+  const key =
+    process.env["DOWNLOAD_API_KEY"] ?? "";
+
+  try {
     const url = new URL(
       "/download",
       base.startsWith("http")
@@ -497,43 +471,59 @@ export async function fetchMedia(
       type,
     );
 
-    if (key) {
-      url.searchParams.set(
-        "api_key",
-        key,
-      );
+    const res =
+      await fetch(url, {
+        headers: {
+          accept: "*/*",
+          ...(key
+            ? { "x-api-key": key }
+            : {}),
+        },
+      });
+
+    if (
+      res.ok &&
+      res.body
+    ) {
+      return res;
     }
 
-    try {
-      const res =
-        await fetch(url, {
-          headers: {
-            accept: "*/*",
-          },
-        });
+    console.error(
+      `[media] Downloader returned ${res.status}`,
+    );
+  } catch (error) {
+    console.error(
+      "[media] Downloader failed:",
+      error,
+    );
+  }
 
-      if (
-        res.ok &&
-        res.body
-      ) {
-        return res;
-      }
+  return null;
+}
 
-      console.error(
-        `[media] External provider returned ${res.status}`,
-      );
-    } catch (error) {
-      console.error(
-        "[media] External provider failed:",
-        error,
-      );
+/**
+ * Download media through an explicitly configured remote service, or through
+ * the local Python service used by the Replit development workflow.
+ */
+export async function fetchMedia(
+  videoId: string,
+  type: "audio" | "video",
+): Promise<Response | null> {
+  const base =
+    process.env["DOWNLOAD_API_URL"];
+
+  if (base) {
+    const response = await fetchDownloader(
+      base,
+      videoId,
+      type,
+    );
+
+    if (response) {
+      return response;
     }
   }
 
-  /*
-   * The Python yt-dlp Vercel function
-   * will be wired into the API route next.
-   */
   return fetchLocalMedia(
     videoId,
     type,

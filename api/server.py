@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import quote
 
 
 API_KEY = os.environ.get("DOWNLOAD_API_KEY", "")
@@ -13,7 +14,7 @@ PORT = int(os.environ.get("PORT", "8080"))
 
 
 def send_json(handler, status, data):
-    body = json.dumps(data).encode("utf-8")
+    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
@@ -29,12 +30,16 @@ def send_json(handler, status, data):
 
 def safe_filename(filename, extension):
     """
-    Make a filename safe for Content-Disposition.
+    Create a safe filename for filesystem/header use.
     """
     filename = os.path.basename(filename)
 
     filename = re.sub(r"[\r\n\t]", " ", filename)
-    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename)
+    filename = re.sub(
+        r'[<>:"/\\|?*\x00-\x1f]',
+        "_",
+        filename,
+    )
 
     filename = filename.strip(" .")
 
@@ -45,6 +50,40 @@ def safe_filename(filename, extension):
         filename += extension
 
     return filename
+
+
+def ascii_filename(filename, extension):
+    """
+    Create an ASCII-only fallback filename.
+
+    BaseHTTPRequestHandler sends headers using Latin-1,
+    so non-Latin characters cannot be placed directly
+    into the normal filename= parameter.
+    """
+    name_without_extension = os.path.splitext(filename)[0]
+
+    ascii_name = (
+        name_without_extension
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+
+    ascii_name = re.sub(
+        r"[^A-Za-z0-9._ -]",
+        "_",
+        ascii_name,
+    )
+
+    ascii_name = re.sub(
+        r"\s+",
+        " ",
+        ascii_name,
+    ).strip(" .")
+
+    if not ascii_name:
+        ascii_name = "aurora-download"
+
+    return ascii_name + extension
 
 
 def extract_path_video_id(path):
@@ -78,9 +117,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        # ---------------------------------------------------------
+        # =========================================================
         # HEALTH CHECK
-        # ---------------------------------------------------------
+        # =========================================================
 
         if path == "/health":
             send_json(
@@ -95,9 +134,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
             return
 
-        # ---------------------------------------------------------
+        # =========================================================
         # DOWNLOAD ROUTES
-        # ---------------------------------------------------------
+        # =========================================================
 
         valid_download_path = (
             path == "/download"
@@ -115,9 +154,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
             return
 
-        # ---------------------------------------------------------
+        # =========================================================
         # API KEY
-        # ---------------------------------------------------------
+        # =========================================================
 
         if API_KEY:
             supplied_key = self.headers.get("x-api-key", "")
@@ -132,9 +171,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-        # ---------------------------------------------------------
+        # =========================================================
         # QUERY PARAMETERS
-        # ---------------------------------------------------------
+        # =========================================================
 
         query = urllib.parse.parse_qs(parsed.query)
 
@@ -142,9 +181,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
         youtube_url = query.get("url", [""])[0].strip()
         media_type = query.get("type", ["audio"])[0].lower().strip()
 
-        # ---------------------------------------------------------
+        # =========================================================
         # SUPPORT /api/download/<VIDEO_ID>
-        # ---------------------------------------------------------
+        # =========================================================
 
         if not video_id and not youtube_url:
             path_video_id = extract_path_video_id(path)
@@ -152,9 +191,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
             if path_video_id:
                 video_id = path_video_id
 
-        # ---------------------------------------------------------
-        # VALIDATE INPUT
-        # ---------------------------------------------------------
+        # =========================================================
+        # VALIDATION
+        # =========================================================
 
         if not video_id and not youtube_url:
             send_json(
@@ -176,18 +215,23 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
             return
 
-        # If an ID was provided, construct the YouTube URL.
+        # =========================================================
+        # BUILD YOUTUBE URL
+        # =========================================================
+
         if video_id:
             youtube_url = (
                 "https://www.youtube.com/watch?v="
                 + urllib.parse.quote(video_id, safe="")
             )
 
-        # ---------------------------------------------------------
-        # TEMPORARY DOWNLOAD DIRECTORY
-        # ---------------------------------------------------------
+        # =========================================================
+        # TEMP DIRECTORY
+        # =========================================================
 
-        temp_dir = tempfile.mkdtemp(prefix="aurora-")
+        temp_dir = tempfile.mkdtemp(
+            prefix="aurora-"
+        )
 
         try:
             output_template = os.path.join(
@@ -195,9 +239,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 "%(title).120s.%(ext)s",
             )
 
-            # -----------------------------------------------------
+            # =====================================================
             # AUDIO
-            # -----------------------------------------------------
+            # =====================================================
 
             if media_type == "audio":
 
@@ -219,9 +263,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 expected_extension = ".mp3"
                 content_type = "audio/mpeg"
 
-            # -----------------------------------------------------
+            # =====================================================
             # VIDEO
-            # -----------------------------------------------------
+            # =====================================================
 
             else:
 
@@ -246,9 +290,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 flush=True,
             )
 
-            # -----------------------------------------------------
+            # =====================================================
             # RUN YT-DLP
-            # -----------------------------------------------------
+            # =====================================================
 
             result = subprocess.run(
                 command,
@@ -281,9 +325,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            # -----------------------------------------------------
-            # FIND OUTPUT FILE
-            # -----------------------------------------------------
+            # =====================================================
+            # FIND OUTPUT
+            # =====================================================
 
             files = []
 
@@ -303,12 +347,14 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     self,
                     502,
                     {
-                        "error": "yt-dlp completed but produced no file",
+                        "error": (
+                            "yt-dlp completed "
+                            "but produced no file"
+                        ),
                     },
                 )
                 return
 
-            # Prefer the requested extension.
             matching_files = [
                 file_path
                 for file_path in files
@@ -322,18 +368,32 @@ class DownloadHandler(BaseHTTPRequestHandler):
             else:
                 file_path = files[0]
 
-            # -----------------------------------------------------
+            # =====================================================
             # FILE INFORMATION
-            # -----------------------------------------------------
+            # =====================================================
 
-            original_filename = os.path.basename(file_path)
+            original_filename = os.path.basename(
+                file_path
+            )
 
             filename = safe_filename(
                 original_filename,
                 expected_extension,
             )
 
-            file_size = os.path.getsize(file_path)
+            fallback_filename = ascii_filename(
+                filename,
+                expected_extension,
+            )
+
+            encoded_filename = quote(
+                filename,
+                safe="",
+            )
+
+            file_size = os.path.getsize(
+                file_path
+            )
 
             if file_size <= 0:
 
@@ -346,9 +406,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            # -----------------------------------------------------
-            # SEND FILE
-            # -----------------------------------------------------
+            # =====================================================
+            # SEND RESPONSE
+            # =====================================================
 
             self.send_response(200)
 
@@ -357,9 +417,21 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 content_type,
             )
 
+            # IMPORTANT:
+            #
+            # filename= is ASCII-only because Python's
+            # BaseHTTPRequestHandler uses Latin-1 for headers.
+            #
+            # filename*= contains the real UTF-8 filename.
+            #
+
             self.send_header(
                 "Content-Disposition",
-                f'attachment; filename="{filename}"',
+                (
+                    f'attachment; '
+                    f'filename="{fallback_filename}"; '
+                    f"filename*=UTF-8''{encoded_filename}"
+                ),
             )
 
             self.send_header(
@@ -379,9 +451,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
             self.end_headers()
 
-            # -----------------------------------------------------
+            # =====================================================
             # STREAM FILE
-            # -----------------------------------------------------
+            # =====================================================
 
             with open(file_path, "rb") as file:
 
@@ -396,9 +468,11 @@ class DownloadHandler(BaseHTTPRequestHandler):
 
                     try:
                         self.wfile.write(chunk)
+
                     except BrokenPipeError:
                         print(
-                            "Client disconnected during download",
+                            "Client disconnected "
+                            "during download",
                             flush=True,
                         )
                         break
@@ -408,9 +482,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 flush=True,
             )
 
-        # ---------------------------------------------------------
+        # =========================================================
         # TIMEOUT
-        # ---------------------------------------------------------
+        # =========================================================
 
         except subprocess.TimeoutExpired:
 
@@ -427,9 +501,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 },
             )
 
-        # ---------------------------------------------------------
+        # =========================================================
         # CLIENT DISCONNECT
-        # ---------------------------------------------------------
+        # =========================================================
 
         except BrokenPipeError:
 
@@ -438,9 +512,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 flush=True,
             )
 
-        # ---------------------------------------------------------
+        # =========================================================
         # GENERAL ERROR
-        # ---------------------------------------------------------
+        # =========================================================
 
         except Exception as exc:
 
@@ -462,9 +536,9 @@ class DownloadHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # ---------------------------------------------------------
+        # =========================================================
         # CLEANUP
-        # ---------------------------------------------------------
+        # =========================================================
 
         finally:
 
@@ -482,7 +556,8 @@ def main():
     )
 
     print(
-        f"Aurora downloader listening on 0.0.0.0:{PORT}",
+        f"Aurora downloader listening on "
+        f"0.0.0.0:{PORT}",
         flush=True,
     )
 

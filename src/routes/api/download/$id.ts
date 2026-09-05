@@ -4,7 +4,7 @@ export const Route = createFileRoute("/api/download/$id")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {
-        const { extractVideoId, ytMeta, safeFileName } =
+        const { extractVideoId, fetchMedia, ytMeta, safeFileName } =
           await import("@/lib/media.server");
 
         const videoId = extractVideoId(params.id);
@@ -23,32 +23,16 @@ export const Route = createFileRoute("/api/download/$id")({
             ? "video"
             : "audio";
 
-        /*
-         * Call the Python yt-dlp function.
-         *
-         * On Vercel, /api/download.py becomes
-         * the Python function endpoint.
-         */
-        const pythonUrl = new URL(
-          "/api/download.py",
-          request.url,
-        );
-
-        pythonUrl.searchParams.set("id", videoId);
-        pythonUrl.searchParams.set("type", type);
-
         try {
-          const upstream = await fetch(pythonUrl, {
-            method: "GET",
-            headers: {
-              accept: "*/*",
-            },
-          });
+          const upstream = await fetchMedia(videoId, type);
 
-          if (!upstream.ok || !upstream.body) {
+          if (!upstream || !upstream.ok || !upstream.body) {
             let details = "Download failed.";
 
             try {
+              if (!upstream) {
+                throw new Error("Downloader unavailable");
+              }
               const json = (await upstream.json()) as {
                 error?: string;
                 details?: string;
@@ -64,7 +48,7 @@ export const Route = createFileRoute("/api/download/$id")({
 
             console.error(
               "[media] Python downloader failed:",
-              upstream.status,
+              upstream?.status ?? 502,
               details,
             );
 
@@ -74,7 +58,7 @@ export const Route = createFileRoute("/api/download/$id")({
               },
               {
                 status:
-                  upstream.status >= 400
+                  upstream && upstream.status >= 400
                     ? upstream.status
                     : 502,
               },
