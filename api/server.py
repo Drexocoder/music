@@ -403,198 +403,304 @@ class DownloadHandler(BaseHTTPRequestHandler):
             )
 
             # =================================================
-            # COMMON YOUTUBE OPTIONS
+            # YOUTUBE DOWNLOAD STRATEGY
             # =================================================
-
-            youtube_options = [
-
-                "--no-playlist",
-
-                # Explicit Deno runtime.
-                "--js-runtimes",
-                "deno",
-
-                # Important:
-                # Avoid the problematic logged-in
-                # tv_downgraded client.
-                "--extractor-args",
-                "youtube:player_client=default,web_embedded",
-
-                "--no-warnings",
-
-                "--no-progress",
-            ]
-
-            # =================================================
-            # AUDIO
+            #
+            # YouTube can return a format that extracts correctly but
+            # later returns HTTP 403 when the actual media URL is fetched.
+            # This is currently a known yt-dlp/YouTube failure mode.
+            #
+            # We therefore try a small set of independent extraction
+            # profiles instead of failing the whole request immediately.
+            #
+            # IMPORTANT:
+            # - First try logged-out web_embedded. This avoids mixing an
+            #   exported browser session with a Vercel data-center IP.
+            # - Then try web_embedded with the supplied cookies.
+            # - Finally try android_vr without cookies as a fallback.
+            # - Force IPv4 because YouTube 403s are also reported on some
+            #   IPv6/data-center routes.
             # =================================================
 
             if media_type == "audio":
-
-                command = [
-
-                    "yt-dlp",
-
-                    *youtube_options,
-
-                    "--extract-audio",
-
-                    "--audio-format",
-                    "mp3",
-
-                    "--audio-quality",
-                    "5",
-
-                    "--output",
-                    output_template,
-                ]
-
-                if cookies_file:
-
-                    command.extend(
-                        [
-                            "--cookies",
-                            cookies_file,
-                        ]
-                    )
-
-                command.append(
-                    youtube_url
-                )
-
                 expected_extension = ".mp3"
-
-                content_type = (
-                    "audio/mpeg"
-                )
-
-            # =================================================
-            # VIDEO
-            # =================================================
-
+                content_type = "audio/mpeg"
             else:
-
-                command = [
-
-                    "yt-dlp",
-
-                    *youtube_options,
-
-                    "--merge-output-format",
-                    "mp4",
-
-                    "--output",
-                    output_template,
-                ]
-
-                if cookies_file:
-
-                    command.extend(
-                        [
-                            "--cookies",
-                            cookies_file,
-                        ]
-                    )
-
-                command.append(
-                    youtube_url
-                )
-
                 expected_extension = ".mp4"
+                content_type = "video/mp4"
 
-                content_type = (
-                    "video/mp4"
-                )
-
-            # =================================================
-            # LOGGING
-            # =================================================
-
-            print(
-                "========================================",
-                flush=True
-            )
-
-            print(
-                "Aurora download request",
-                flush=True
-            )
-
-            print(
-                "URL:",
-                youtube_url,
-                flush=True
-            )
-
-            print(
-                "Type:",
-                media_type,
-                flush=True
-            )
-
-            print(
-                "yt-dlp:",
-                shutil.which("yt-dlp")
-                or "NOT FOUND",
-                flush=True
-            )
-
-            print(
-                "ffmpeg:",
-                shutil.which("ffmpeg")
-                or "NOT FOUND",
-                flush=True
-            )
-
-            print(
-                "Deno:",
-                shutil.which("deno")
-                or "NOT FOUND",
-                flush=True
-            )
-
-            print(
-                "Cookies:",
-                "enabled"
-                if cookies_file
-                else "disabled",
-                flush=True
-            )
-
-            safe_command = [
-                str(x)
-                for x in command
+            profiles = [
+                {
+                    "name": "web_embedded_no_cookies",
+                    "clients": "web_embedded",
+                    "cookies": False,
+                },
+                {
+                    "name": "default_web_embedded_with_cookies",
+                    "clients": "default,web_embedded",
+                    "cookies": True,
+                },
+                {
+                    "name": "android_vr_no_cookies",
+                    "clients": "android_vr",
+                    "cookies": False,
+                },
             ]
 
-            if cookies_file:
+            result = None
+            successful_attempt = None
 
-                safe_command = [
-                    "<cookies>"
-                    if x == cookies_file
-                    else x
-                    for x in safe_command
+            for attempt_number, profile in enumerate(profiles, start=1):
+
+                # Remove files produced by a previous failed attempt.
+                for old_filename in os.listdir(temp_dir):
+                    old_path = os.path.join(temp_dir, old_filename)
+
+                    if os.path.isfile(old_path):
+                        try:
+                            os.remove(old_path)
+                        except OSError:
+                            pass
+
+                youtube_options = [
+                    "yt-dlp",
+
+                    "--no-playlist",
+
+                    # Explicit JavaScript runtime.
+                    "--js-runtimes",
+                    "deno",
+
+                    # Current YouTube client workaround.
+                    "--extractor-args",
+                    f"youtube:player_client={profile['clients']}",
+
+                    # Prefer IPv4 on Vercel/data-center networking.
+                    "--force-ipv4",
+
+                    # Give transient 403/network failures a chance to
+                    # recover without hanging the request indefinitely.
+                    "--retries",
+                    "3",
+                    "--fragment-retries",
+                    "3",
+                    "--retry-sleep",
+                    "http:exp=1:20",
+
+                    "--no-warnings",
+                    "--no-progress",
+
+                    # Do not continue trying alternate formats after a
+                    # single unavailable format. The next profile handles
+                    # client changes explicitly.
+                    "--no-abort-on-error",
+
+                    "--output",
+                    output_template,
                 ]
 
-            print(
-                "Command:",
-                " ".join(safe_command),
-                flush=True
-            )
+                # For video, prefer separate MP4 video/audio streams and
+                # fall back to a single MP4 stream when that is all the
+                # selected YouTube client exposes.
+                if media_type == "video":
+                    youtube_options.extend(
+                        [
+                            "--format",
+                            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                            "--merge-output-format",
+                            "mp4",
+                        ]
+                    )
+                else:
+                    youtube_options.extend(
+                        [
+                            "--extract-audio",
+                            "--audio-format",
+                            "mp3",
+                            "--audio-quality",
+                            "5",
+                        ]
+                    )
 
-            print(
-                "========================================",
-                flush=True
-            )
+                # Only attach cookies to the profiles that explicitly
+                # require them. This is important because YouTube can treat
+                # a browser session differently from a Vercel IP.
+                if profile["cookies"] and cookies_file:
+                    youtube_options.extend(
+                        [
+                            "--cookies",
+                            cookies_file,
+                        ]
+                    )
+
+                command = [
+                    *youtube_options,
+                    youtube_url,
+                ]
+
+                print(
+                    "========================================",
+                    flush=True,
+                )
+
+                print(
+                    f"Aurora download attempt {attempt_number}/{len(profiles)}",
+                    flush=True,
+                )
+
+                print(
+                    "Profile:",
+                    profile["name"],
+                    flush=True,
+                )
+
+                print(
+                    "URL:",
+                    youtube_url,
+                    flush=True,
+                )
+
+                print(
+                    "Type:",
+                    media_type,
+                    flush=True,
+                )
+
+                print(
+                    "yt-dlp:",
+                    shutil.which("yt-dlp") or "NOT FOUND",
+                    flush=True,
+                )
+
+                print(
+                    "ffmpeg:",
+                    shutil.which("ffmpeg") or "NOT FOUND",
+                    flush=True,
+                )
+
+                print(
+                    "Deno:",
+                    shutil.which("deno") or "NOT FOUND",
+                    flush=True,
+                )
+
+                print(
+                    "Cookies:",
+                    "enabled"
+                    if profile["cookies"] and cookies_file
+                    else "disabled",
+                    flush=True,
+                )
+
+                safe_command = [
+                    str(x)
+                    for x in command
+                ]
+
+                if cookies_file:
+                    safe_command = [
+                        "<cookies>"
+                        if x == cookies_file
+                        else x
+                        for x in safe_command
+                    ]
+
+                print(
+                    "Command:",
+                    " ".join(safe_command),
+                    flush=True,
+                )
+
+                print(
+                    "========================================",
+                    flush=True,
+                )
+
+                try:
+                    result = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        timeout=1500,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    result = subprocess.CompletedProcess(
+                        command,
+                        124,
+                        "",
+                        f"Download attempt timed out: {exc}",
+                    )
+
+                # Log output for every attempt so Vercel logs tell us
+                # exactly which YouTube profile succeeded or failed.
+                if result.stdout.strip():
+                    print(
+                        f"yt-dlp stdout (attempt {attempt_number}):",
+                        result.stdout[-8000:],
+                        flush=True,
+                    )
+
+                if result.stderr.strip():
+                    print(
+                        f"yt-dlp stderr (attempt {attempt_number}):",
+                        result.stderr[-8000:],
+                        flush=True,
+                    )
+
+                if result.returncode == 0:
+                    successful_attempt = profile["name"]
+                    print(
+                        "yt-dlp succeeded with profile:",
+                        successful_attempt,
+                        flush=True,
+                    )
+                    break
+
+                print(
+                    "yt-dlp attempt failed:",
+                    profile["name"],
+                    "return code:",
+                    result.returncode,
+                    flush=True,
+                )
 
             # =================================================
-            # RUN YT-DLP
+            # FAILURE
             # =================================================
 
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=1500
+            if result is None or result.returncode != 0:
+
+                details = (
+                    result.stderr.strip()
+                    if result is not None
+                    else ""
+                ) or (
+                    result.stdout.strip()
+                    if result is not None
+                    else ""
+                ) or "Unknown yt-dlp error"
+
+                print(
+                    "All yt-dlp download profiles failed:",
+                    details,
+                    flush=True,
+                )
+
+                send_json(
+                    self,
+                    502,
+                    {
+                        "error": "yt-dlp download failed",
+                        "details": details[-6000:],
+                    },
+                )
+
+                return
+
+            print(
+                "Successful profile:",
+                successful_attempt or "unknown",
+                flush=True,
             )
 
             # =================================================
