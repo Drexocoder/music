@@ -144,7 +144,7 @@ export function randomApiKey(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `Nex-${hex}`;
+  return `Nex_${hex}_Aurora`;
 }
 
 export function defaultPlan() {
