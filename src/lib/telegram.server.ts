@@ -63,8 +63,8 @@ export type LogEntry = {
 
 export async function logMessage(entry: LogEntry) {
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("telegram_messages").insert({
+    const { mongoCollection } = await import("@/lib/mongodb.server");
+    await (await mongoCollection("telegram_messages")).insertOne({
       chat_id: entry.chat_id,
       direction: entry.direction,
       text: entry.text ?? null,
@@ -73,7 +73,8 @@ export async function logMessage(entry: LogEntry) {
       telegram_user_id: entry.telegram_user_id ?? null,
       username: entry.username ?? null,
       first_name: entry.first_name ?? null,
-    } as never);
+      created_at: new Date(),
+    });
   } catch (err) {
     console.error("[telegram log]", err);
   }
