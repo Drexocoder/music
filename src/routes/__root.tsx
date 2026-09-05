@@ -145,7 +145,7 @@ export const Route = createRootRouteWithContext<{
       },
       {
         rel: "icon",
-        href: "/favicon.ico",
+        href: "/Auroralogo.ico",
         type: "image/x-icon",
       },
     ],
