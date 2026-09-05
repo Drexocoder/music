@@ -147,18 +147,38 @@ async function handleUpdate(update: Update, origin: string) {
   // Fire-and-forget: don't block the reply on the user upsert.
   background(upsertBotUser(fromId, from?.username ?? null, from?.first_name ?? null));
 
+  const log = async (entry: {
+    direction: "in" | "out";
+    text?: string | null;
+    kind?: string | null;
+  }) => {
+    const { logMessage } = await import("@/lib/telegram.server");
+    await logMessage({
+      chat_id: chatId,
+      telegram_user_id: fromId,
+      username: from?.username ?? null,
+      first_name: from?.first_name ?? null,
+      ...entry,
+    });
+  };
+
+  background(log({ direction: "in", text, kind: cb ? "button" : "message" }));
+
   const [rawCmd, ...rest] = text.split(/\s+/);
   const cmd = (rawCmd ?? "").toLowerCase().split("@")[0];
   const arg = rest.join(" ").trim();
 
-  const say = (t: string, keyboard?: unknown) =>
-    tg("sendMessage", {
+  const say = (t: string, keyboard?: unknown) => {
+    background(log({ direction: "out", text: t, kind: "bot" }));
+    return tg("sendMessage", {
       chat_id: chatId,
       text: t,
       parse_mode: "HTML",
       disable_web_page_preview: true,
       ...(keyboard ? { reply_markup: keyboard } : {}),
     });
+  };
+
 
   if (cmd === "/start" || cmd === "/help" || cmd === "/menu") {
     // sendMessage is much faster than sendPhoto — banner shipped as link preview.

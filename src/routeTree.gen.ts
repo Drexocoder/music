@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevelopersRouteImport } from './routes/developers'
+import { Route as AdminTelegramRouteImport } from './routes/admin/telegram'
 import { Route as ApiDownloadIdRouteImport } from './routes/api/download/$id'
 import { Route as ApiPublicGuideYoutubeDotpyRouteImport } from './routes/api/public/guide/youtube[.]py'
 import { Route as ApiPublicTelegramWebhookRouteImport } from './routes/api/public/telegram/webhook'
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
 const DevelopersRoute = DevelopersRouteImport.update({
   id: '/developers',
   path: '/developers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminTelegramRoute = AdminTelegramRouteImport.update({
+  id: '/admin/telegram',
+  path: '/admin/telegram',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDownloadIdRoute = ApiDownloadIdRouteImport.update({
@@ -82,6 +88,7 @@ const ApiPublicV2StatusRoute = ApiPublicV2StatusRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/developers': typeof DevelopersRoute
+  '/admin/telegram': typeof AdminTelegramRoute
   '/api/download/$id': typeof ApiDownloadIdRoute
   '/api/public/guide/youtube.py': typeof ApiPublicGuideYoutubeDotpyRoute
   '/api/public/telegram/webhook': typeof ApiPublicTelegramWebhookRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/developers': typeof DevelopersRoute
+  '/admin/telegram': typeof AdminTelegramRoute
   '/api/download/$id': typeof ApiDownloadIdRoute
   '/api/public/guide/youtube.py': typeof ApiPublicGuideYoutubeDotpyRoute
   '/api/public/telegram/webhook': typeof ApiPublicTelegramWebhookRoute
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/developers': typeof DevelopersRoute
+  '/admin/telegram': typeof AdminTelegramRoute
   '/api/download/$id': typeof ApiDownloadIdRoute
   '/api/public/guide/youtube.py': typeof ApiPublicGuideYoutubeDotpyRoute
   '/api/public/telegram/webhook': typeof ApiPublicTelegramWebhookRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/developers'
+    | '/admin/telegram'
     | '/api/download/$id'
     | '/api/public/guide/youtube.py'
     | '/api/public/telegram/webhook'
@@ -137,6 +147,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/developers'
+    | '/admin/telegram'
     | '/api/download/$id'
     | '/api/public/guide/youtube.py'
     | '/api/public/telegram/webhook'
@@ -150,6 +161,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/developers'
+    | '/admin/telegram'
     | '/api/download/$id'
     | '/api/public/guide/youtube.py'
     | '/api/public/telegram/webhook'
@@ -164,6 +176,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DevelopersRoute: typeof DevelopersRoute
+  AdminTelegramRoute: typeof AdminTelegramRoute
   ApiDownloadIdRoute: typeof ApiDownloadIdRoute
   ApiPublicGuideYoutubeDotpyRoute: typeof ApiPublicGuideYoutubeDotpyRoute
   ApiPublicTelegramWebhookRoute: typeof ApiPublicTelegramWebhookRoute
@@ -189,6 +202,13 @@ declare module '@tanstack/react-router' {
       path: '/developers'
       fullPath: '/developers'
       preLoaderRoute: typeof DevelopersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/telegram': {
+      id: '/admin/telegram'
+      path: '/admin/telegram'
+      fullPath: '/admin/telegram'
+      preLoaderRoute: typeof AdminTelegramRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/download/$id': {
@@ -260,6 +280,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DevelopersRoute: DevelopersRoute,
+  AdminTelegramRoute: AdminTelegramRoute,
   ApiDownloadIdRoute: ApiDownloadIdRoute,
   ApiPublicGuideYoutubeDotpyRoute: ApiPublicGuideYoutubeDotpyRoute,
   ApiPublicTelegramWebhookRoute: ApiPublicTelegramWebhookRoute,
