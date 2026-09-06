@@ -405,20 +405,22 @@ export async function ytMeta(
   }
 }
 
+/**
+ * The local Python downloader only exists on Replit/local dev, where it
+ * runs beside the frontend. It must be opted into explicitly: on serverless
+ * hosts (Vercel, Cloudflare) localhost is the frontend itself, so probing it
+ * makes the app call its own /api/download route and fail with a 502.
+ */
 function localDownloaderEnabled(): boolean {
   const configured =
     process.env["DOWNLOAD_LOCAL_ENABLED"]
       ?.trim()
       .toLowerCase();
 
-  if (
-    configured === "false" ||
-    configured === "0"
-  ) {
-    return false;
-  }
-
-  return true;
+  return (
+    configured === "true" ||
+    configured === "1"
+  );
 }
 
 export function providerConfigured(): boolean {
@@ -438,35 +440,6 @@ async function fetchLocalMedia(
     return null;
   }
 
-  /*
-   * Replit/local development: the Python downloader can run beside
-   * the frontend on localhost:8080.
-   *
-   * Vercel Services are different containers, so localhost there is
-   * the frontend container, NOT the downloader container. On Vercel,
-   * use the public /api/download rewrite instead.
-   */
-  const isVercel = Boolean(process.env["VERCEL"]);
-
-  if (isVercel) {
-    const publicAppUrl =
-      process.env["PUBLIC_APP_URL"]?.trim().replace(/\/+$/, "");
-
-    if (!publicAppUrl) {
-      console.error(
-        "[media] Vercel downloader fallback requires PUBLIC_APP_URL.",
-      );
-      return null;
-    }
-
-    return fetchDownloader(
-      publicAppUrl,
-      videoId,
-      type,
-      true,
-    );
-  }
-
   return fetchDownloader(
     "http://127.0.0.1:8080",
     videoId,
@@ -474,6 +447,7 @@ async function fetchLocalMedia(
     false,
   );
 }
+
 
 async function fetchDownloader(
   base: string,
