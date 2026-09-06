@@ -15,17 +15,11 @@ import {
  */
 async function setupWebhook(request: Request) {
   const configuredOrigin =
-    process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
-
-  const origin = configuredOrigin || publicOrigin(request);
-
-  const webhookUrl =
-    `${origin}/api/public/telegram/webhook`;
-
-  try {
+    process.env["PUBLIC_APP_URL"]?.trim().replace(/\/+$/, "");
+...
     if (
-      !process.env.TELEGRAM_BOT_TOKEN &&
-      !process.env.TELEGRAM_API_KEY
+      !process.env["TELEGRAM_BOT_TOKEN"] &&
+      !process.env["TELEGRAM_API_KEY"]
     ) {
       return Response.json(
         {
