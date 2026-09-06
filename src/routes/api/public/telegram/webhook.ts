@@ -129,7 +129,7 @@ async function handleUpdate(update: Update, origin: string) {
       import("@/lib/media.server"),
       Promise.all(acks).catch(() => undefined),
     ]);
-  const { ytSearch, extractVideoId, ytMeta, providerConfigured } = media;
+  const { ytSearch, extractVideoId, ytMeta } = media;
 
   // Fire-and-forget: don't block the reply on the user upsert.
   background(upsertBotUser(fromId, from?.username ?? null, from?.first_name ?? null));
@@ -368,17 +368,6 @@ async function handleUpdate(update: Update, origin: string) {
     return;
   }
   const { id: videoId, title } = resolved;
-
-  if (!providerConfigured()) {
-    await say(
-      [
-        `🎵 <b>${title}</b>`,
-        "",
-        "Downloads are unavailable on this deployment. Please try again later.",
-      ].join("\n"),
-    );
-    return;
-  }
 
   // Keep the typing indicator alive while Telegram fetches the file — no extra "Fetching…" message.
   background(tg("sendChatAction", { chat_id: chatId, action: wantsVideo ? "upload_video" : "upload_voice" }));

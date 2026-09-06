@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/public/v1/download")({
           );
         }
 
-        const { extractVideoId, fetchMedia, ytMeta, safeFileName, providerConfigured } =
+        const { extractVideoId, fetchMedia, ytMeta, safeFileName } =
           await import("@/lib/media.server");
         const videoId = extractVideoId(target);
         if (!videoId) {
@@ -32,14 +32,9 @@ export const Route = createFileRoute("/api/public/v1/download")({
           );
         }
 
-        if (!providerConfigured()) {
-          return Response.json(
-            { ok: false, error: "Media provider is not configured on this server." },
-            { status: 503 },
-          );
-        }
-
-        const upstream = await fetchMedia(videoId, type);
+        const upstream = await fetchMedia(videoId, type, {
+          downloaderOrigin: new URL(request.url).origin,
+        });
         if (!upstream || !upstream.body) {
           return Response.json({ ok: false, error: "Download failed." }, { status: 502 });
         }

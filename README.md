@@ -55,9 +55,13 @@ New keys use the Free plan defaults and have the format `Nex_<random>_Aurora`.
 1. Import this repository into Vercel and keep the default build command
    `npm run build`.
 2. Add the variables in `.env.example` to the Vercel project settings. At
-   minimum, configure `MONGODB_URI` and `TELEGRAM_BOT_TOKEN`. The MongoDB URI
-   should include the target database name, or you can set `MONGODB_DB_NAME`
-   separately.
+   minimum, configure `MONGODB_URI`, `TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_ADMIN_PASSCODE`, and `YOUTUBE_COOKIES_B64`. The cookie secret must
+   be the base64-encoded Netscape `cookies.txt` export; never commit the raw
+   cookie file. The MongoDB URI should include the target database name, or you
+   can set `MONGODB_DB_NAME` separately. Set `DOWNLOAD_LOCAL_ENABLED=false` on
+   Vercel; the public app route reaches the separate downloader service through
+   the rewrite in `vercel.json`.
 3. After the first deployment, register the webhook from the running app. The
    server reads `TELEGRAM_BOT_TOKEN` and derives the matching secret internally:
 

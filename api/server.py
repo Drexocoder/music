@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 API_KEY = os.environ.get("DOWNLOAD_API_KEY", "")
 YOUTUBE_COOKIES_B64 = os.environ.get("YOUTUBE_COOKIES_B64", "")
+YOUTUBE_COOKIES_TEXT = os.environ.get("YOUTUBE_COOKIES", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
 
@@ -135,7 +136,7 @@ def extract_path_video_id(path):
 
 def create_cookie_file(temp_dir):
 
-    if not YOUTUBE_COOKIES_B64:
+    if not YOUTUBE_COOKIES_B64 and not YOUTUBE_COOKIES_TEXT:
         return None
 
     cookies_file = os.path.join(
@@ -144,11 +145,31 @@ def create_cookie_file(temp_dir):
     )
 
     try:
+        if YOUTUBE_COOKIES_B64:
+            encoded = YOUTUBE_COOKIES_B64.strip()
 
-        cookie_bytes = base64.b64decode(
-            YOUTUBE_COOKIES_B64,
-            validate=True
-        )
+            # Accept data URLs and base64 wrapped across multiple lines by
+            # secret managers or shell copy/paste.
+            if "," in encoded and encoded.lower().startswith("data:"):
+                encoded = encoded.split(",", 1)[1]
+
+            encoded = re.sub(r"\s+", "", encoded)
+
+            try:
+                cookie_bytes = base64.b64decode(
+                    encoded,
+                    altchars=b"-_",
+                    validate=True
+                )
+            except Exception:
+                # Some exporters omit padding or use URL-safe base64.
+                cookie_bytes = base64.urlsafe_b64decode(
+                    encoded + "=" * (-len(encoded) % 4)
+                )
+        else:
+            # Useful for local development. Deployments should prefer the
+            # base64 secret so the cookie file never lives in the repository.
+            cookie_bytes = YOUTUBE_COOKIES_TEXT.encode("utf-8")
 
         if not cookie_bytes:
             raise ValueError(
@@ -414,10 +435,8 @@ class DownloadHandler(BaseHTTPRequestHandler):
             # profiles instead of failing the whole request immediately.
             #
             # IMPORTANT:
-            # - First try logged-out web_embedded. This avoids mixing an
-            #   exported browser session with a Vercel data-center IP.
-            # - Then try web_embedded with the supplied cookies.
-            # - Finally try android_vr without cookies as a fallback.
+            # - First try authenticated clients when supplied cookies exist.
+            # - Then try logged-out clients as a fallback.
             # - Force IPv4 because YouTube 403s are also reported on some
             #   IPv6/data-center routes.
             # =================================================
@@ -429,23 +448,47 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 expected_extension = ".mp4"
                 content_type = "video/mp4"
 
-            profiles = [
-                {
-                    "name": "web_embedded_no_cookies",
-                    "clients": "web_embedded",
-                    "cookies": False,
-                },
-                {
-                    "name": "default_web_embedded_with_cookies",
-                    "clients": "default,web_embedded",
-                    "cookies": True,
-                },
-                {
-                    "name": "android_vr_no_cookies",
-                    "clients": "android_vr",
-                    "cookies": False,
-                },
-            ]
+            profiles = []
+
+            # An exported browser session is the most reliable way through
+            # YouTube's data-center bot check. Try it first when configured,
+            # using a few clients because YouTube can reject one while
+            # accepting another with the same session.
+            if cookies_file:
+                profiles.extend(
+                    [
+                        {
+                            "name": "default_with_cookies",
+                            "clients": "default",
+                            "cookies": True,
+                        },
+                        {
+                            "name": "web_embedded_with_cookies",
+                            "clients": "web_embedded",
+                            "cookies": True,
+                        },
+                        {
+                            "name": "web_safari_with_cookies",
+                            "clients": "web_safari",
+                            "cookies": True,
+                        },
+                    ]
+                )
+
+            profiles.extend(
+                [
+                    {
+                        "name": "web_embedded_no_cookies",
+                        "clients": "web_embedded",
+                        "cookies": False,
+                    },
+                    {
+                        "name": "android_vr_no_cookies",
+                        "clients": "android_vr",
+                        "cookies": False,
+                    },
+                ]
+            )
 
             result = None
             successful_attempt = None
@@ -1058,7 +1101,7 @@ def main():
     print(
         "cookies:",
         "configured"
-        if YOUTUBE_COOKIES_B64
+        if YOUTUBE_COOKIES_B64 or YOUTUBE_COOKIES_TEXT
         else "NOT CONFIGURED",
         flush=True
     )

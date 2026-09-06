@@ -520,6 +520,15 @@ async function fetchDownloader(
   return null;
 }
 
+type FetchMediaOptions = {
+  /**
+   * The public app origin. On Vercel this lets the frontend server function
+   * reach the separate `/api/download` container through the configured
+   * rewrite instead of falling back to an unrelated public mirror.
+   */
+  downloaderOrigin?: string;
+};
+
 const PIPED_INSTANCES = [
   "https://pipedapi.kavin.rocks",
   "https://pipedapi.adminforge.de",
@@ -624,6 +633,7 @@ export async function resolveStream(
 export async function fetchMedia(
   videoId: string,
   type: "audio" | "video",
+  options: FetchMediaOptions = {},
 ): Promise<Response | null> {
   const base =
     process.env["DOWNLOAD_API_URL"]?.trim();
@@ -649,6 +659,19 @@ export async function fetchMedia(
 
   if (local) {
     return local;
+  }
+
+  if (options.downloaderOrigin) {
+    const deployed = await fetchDownloader(
+      options.downloaderOrigin,
+      videoId,
+      type,
+      true,
+    );
+
+    if (deployed) {
+      return deployed;
+    }
   }
 
   const stream = await resolveStream(

@@ -9,18 +9,7 @@ export const Route = createFileRoute("/api/download/$id")({
           fetchMedia,
           ytMeta,
           safeFileName,
-          providerConfigured,
         } = await import("@/lib/media.server");
-
-        if (!providerConfigured()) {
-          return Response.json(
-            {
-              error:
-                "Downloads are not set up yet. Point DOWNLOAD_API_URL at your yt-dlp download service.",
-            },
-            { status: 503 },
-          );
-        }
 
 
         const videoId = extractVideoId(params.id);
@@ -40,7 +29,9 @@ export const Route = createFileRoute("/api/download/$id")({
             : "audio";
 
         try {
-          const upstream = await fetchMedia(videoId, type);
+          const upstream = await fetchMedia(videoId, type, {
+            downloaderOrigin: new URL(request.url).origin,
+          });
 
           if (!upstream || !upstream.ok || !upstream.body) {
             let details = "Download failed.";
