@@ -1,13 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { createHash, timingSafeEqual } from "crypto";
-import banner from "@/assets/bot-banner.jpg.asset.json";
+import { timingSafeEqual } from "crypto";
 import { OWNER_TELEGRAM_ID, PLANS, SUPPORT_HANDLE, planById } from "@/lib/plans";
-
-const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
-
-function deriveSecret(apiKey: string): string {
-  return createHash("sha256").update(`telegram-webhook:${apiKey}`).digest("base64url");
-}
+import { FILE as YOUTUBE_GUIDE } from "@/lib/guide-youtube-py";
+import { publicOrigin, telegramRequest, telegramWebhookSecret } from "@/lib/telegram.server";
 
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
@@ -16,15 +11,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 async function tg(method: string, body: unknown) {
-  const res = await fetch(`${GATEWAY}/${method}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env["LOVABLE_API_KEY"]}`,
-      "X-Connection-Api-Key": `${process.env["TELEGRAM_API_KEY"]}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await telegramRequest(method, body);
   if (!res.ok) {
     console.error(`Telegram ${method} failed [${res.status}]: ${await res.text()}`);
   }
@@ -66,7 +53,7 @@ function plansText(): string {
   ].join("\n");
 }
 
-function mainKeyboard(origin: string) {
+function mainKeyboard() {
   return {
     inline_keyboard: [
       [
@@ -78,8 +65,8 @@ function mainKeyboard(origin: string) {
         { text: "📊 My usage", callback_data: "usage" },
       ],
       [
-        { text: "🛒 Buy a plan", url: `https://t.me/${SUPPORT_HANDLE.replace("@", "")}` },
-        { text: "📚 Docs", url: `${origin}/developers` },
+        { text: "🛒 Buy a plan", callback_data: "buy" },
+        { text: "❓ Help", callback_data: "help" },
       ],
     ],
   };
@@ -88,7 +75,7 @@ function mainKeyboard(origin: string) {
 function plansKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: `🛒 Buy — contact ${SUPPORT_HANDLE}`, url: `https://t.me/${SUPPORT_HANDLE.replace("@", "")}` }],
+      [{ text: "🛒 How to buy", callback_data: "buy" }],
       [{ text: "🔑 Get free key", callback_data: "key" }],
     ],
   };
@@ -181,8 +168,7 @@ async function handleUpdate(update: Update, origin: string) {
 
 
   if (cmd === "/start" || cmd === "/help" || cmd === "/menu") {
-    // sendMessage is much faster than sendPhoto — banner shipped as link preview.
-    await say(HELP, mainKeyboard(origin));
+    await say(HELP, mainKeyboard());
     return;
   }
 
@@ -192,20 +178,27 @@ async function handleUpdate(update: Update, origin: string) {
   }
 
   if (cmd === "/guide" || cmd === "/docs") {
-    await tg("sendDocument", {
-      chat_id: chatId,
-      document: `${origin}/api/public/guide/youtube.py`,
-      caption: [
+    const guide = new FormData();
+    guide.append("chat_id", String(chatId));
+    guide.append(
+      "document",
+      new Blob([YOUTUBE_GUIDE.replaceAll("{ORIGIN}", origin)], {
+        type: "text/x-python",
+      }),
+      "youtube.py",
+    );
+    guide.append(
+      "caption",
+      [
         "📄 <b>youtube.py</b> — drop this into your music bot.",
         "",
         "1. <code>pip install aiohttp</code>",
         "2. Put your key in <code>NEX_API_KEY</code> (or edit the file).",
         "3. <code>from youtube import search, download_song, download_video</code>",
-        "",
-        `Full docs: ${origin}/developers`,
       ].join("\n"),
-      parse_mode: "HTML",
-    });
+    );
+    guide.append("parse_mode", "HTML");
+    await tg("sendDocument", guide);
     return;
   }
 
@@ -271,9 +264,8 @@ async function handleUpdate(update: Update, origin: string) {
         `Valid until: <b>${new Date(key.expires_at).toDateString()}</b>`,
         "",
         `Need more? Send /plans.`,
-        `Docs: ${origin}/developers`,
       ].join("\n"),
-      mainKeyboard(origin),
+      mainKeyboard(),
     );
     return;
   }
@@ -349,7 +341,7 @@ async function handleUpdate(update: Update, origin: string) {
     cmd === "/song" || cmd === "/play" || wantsVideo ? arg : text.startsWith("/") ? "" : text;
 
   if (!query) {
-    await say(HELP, mainKeyboard(origin));
+    await say(HELP, mainKeyboard());
     return;
   }
 
@@ -368,7 +360,7 @@ async function handleUpdate(update: Update, origin: string) {
   ]);
 
   if (!key) {
-    await say("You need a key first. Send /key to generate your free one.", mainKeyboard(origin));
+    await say("You need a key first. Send /key to generate your free one.", mainKeyboard());
     return;
   }
   if (!resolved.id) {
@@ -382,17 +374,8 @@ async function handleUpdate(update: Update, origin: string) {
       [
         `🎵 <b>${title}</b>`,
         "",
-        "The download service isn't switched on yet, so here is the track to play:",
-        `${origin}/?v=${videoId}`,
+        "Downloads are unavailable on this deployment. Please try again later.",
       ].join("\n"),
-      {
-        inline_keyboard: [
-          [
-            { text: "▶️ Play in Aurora", url: `${origin}/?v=${videoId}` },
-            { text: "YouTube", url: `https://youtu.be/${videoId}` },
-          ],
-        ],
-      },
     );
     return;
   }
@@ -407,13 +390,7 @@ async function handleUpdate(update: Update, origin: string) {
     : await tg("sendAudio", { chat_id: chatId, audio: fileUrl, title, caption: title });
 
   if (!res.ok) {
-    await say(
-      [
-        "😕 Couldn't send that file — it may be larger than Telegram's 20 MB link limit.",
-        "",
-        `Play it here instead: ${origin}/?v=${videoId}`,
-      ].join("\n"),
-    );
+    await say("😕 Couldn't send that file. It may be larger than Telegram's file limit; try another result.");
   }
 }
 
@@ -421,21 +398,32 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const apiKey = process.env["TELEGRAM_API_KEY"];
-        if (!apiKey) return new Response("Not configured", { status: 500 });
+        if (!process.env["TELEGRAM_BOT_TOKEN"] && !process.env["TELEGRAM_API_KEY"]) {
+          return new Response("Not configured", { status: 500 });
+        }
 
         const provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token") ?? "";
-        if (!safeEqual(provided, deriveSecret(apiKey))) {
+        if (!safeEqual(provided, telegramWebhookSecret())) {
           return new Response("Unauthorized", { status: 401 });
         }
 
         const update = (await request.json()) as Update;
-        const origin = new URL(request.url).origin;
+        const origin = publicOrigin(request);
 
-        // Ack Telegram immediately (avoids retries + gives the user a snappy feel);
-        // do the real work in the background so Telegram never waits on our API calls.
-        background(handleUpdate(update, origin));
-
+        // Await the handler: Vercel may freeze a function as soon as a response
+        // is returned, so fire-and-forget work is not reliable there.
+        try {
+          await handleUpdate(update, origin);
+        } catch (error) {
+          console.error("[telegram update]", error);
+          const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
+          if (chatId) {
+            await tg("sendMessage", {
+              chat_id: chatId,
+              text: "⚠️ The bot is temporarily unable to access key storage. Please try again shortly.",
+            }).catch((sendError) => console.error("[telegram error reply]", sendError));
+          }
+        }
         return Response.json({ ok: true });
       },
     },
