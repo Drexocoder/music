@@ -4,8 +4,24 @@ export const Route = createFileRoute("/api/download/$id")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {
-        const { extractVideoId, fetchMedia, ytMeta, safeFileName } =
-          await import("@/lib/media.server");
+        const {
+          extractVideoId,
+          fetchMedia,
+          ytMeta,
+          safeFileName,
+          providerConfigured,
+        } = await import("@/lib/media.server");
+
+        if (!providerConfigured()) {
+          return Response.json(
+            {
+              error:
+                "Downloads are not set up yet. Point DOWNLOAD_API_URL at your yt-dlp download service.",
+            },
+            { status: 503 },
+          );
+        }
+
 
         const videoId = extractVideoId(params.id);
 
