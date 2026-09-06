@@ -520,12 +520,106 @@ async function fetchDownloader(
   return null;
 }
 
+const PIPED_INSTANCES = [
+  "https://pipedapi.kavin.rocks",
+  "https://pipedapi.adminforge.de",
+  "https://api.piped.private.coffee",
+  "https://pipedapi.reallyaweso.me",
+];
+
+type PipedStream = {
+  url?: string;
+  mimeType?: string;
+  bitrate?: number;
+  quality?: string;
+  videoOnly?: boolean;
+};
+
+export type ResolvedStream = {
+  url: string;
+  mimeType: string;
+};
+
+/**
+ * Keyless stream resolver: asks public Piped instances for the direct
+ * googlevideo stream URL. Runs anywhere (no yt-dlp, no ffmpeg, no disk).
+ */
+export async function resolveStream(
+  videoId: string,
+  type: "audio" | "video",
+): Promise<ResolvedStream | null> {
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      const res = await fetch(
+        `${instance}/streams/${videoId}`,
+        {
+          headers: { accept: "application/json" },
+          signal: AbortSignal.timeout(8000),
+        },
+      );
+
+      if (!res.ok) continue;
+
+      const json = (await res.json()) as {
+        audioStreams?: PipedStream[];
+        videoStreams?: PipedStream[];
+      };
+
+      if (type === "audio") {
+        const best = (json.audioStreams ?? [])
+          .filter((s) => s.url)
+          .sort(
+            (a, b) =>
+              (b.bitrate ?? 0) - (a.bitrate ?? 0),
+          )[0];
+
+        if (best?.url) {
+          return {
+            url: best.url,
+            mimeType:
+              best.mimeType ?? "audio/mp4",
+          };
+        }
+
+        continue;
+      }
+
+      const best = (json.videoStreams ?? [])
+        .filter(
+          (s) =>
+            s.url &&
+            !s.videoOnly &&
+            (s.mimeType ?? "").includes("mp4"),
+        )
+        .sort(
+          (a, b) =>
+            parseInt(b.quality ?? "0", 10) -
+            parseInt(a.quality ?? "0", 10),
+        )[0];
+
+      if (best?.url) {
+        return {
+          url: best.url,
+          mimeType: best.mimeType ?? "video/mp4",
+        };
+      }
+    } catch (error) {
+      console.error(
+        `[media] Stream resolver ${instance} failed:`,
+        error,
+      );
+    }
+  }
+
+  return null;
+}
+
 /**
  * Download media through:
  *
  * 1. Explicit DOWNLOAD_API_URL when configured.
- * 2. The Vercel /api/download rewrite when running on Vercel.
- * 3. The local Python downloader on Replit/local development.
+ * 2. The local Python downloader when opted in (Replit/local dev).
+ * 3. Keyless public stream resolver (works on serverless hosts).
  */
 export async function fetchMedia(
   videoId: string,
@@ -548,11 +642,47 @@ export async function fetchMedia(
     }
   }
 
-  return fetchLocalMedia(
+  const local = await fetchLocalMedia(
     videoId,
     type,
   );
+
+  if (local) {
+    return local;
+  }
+
+  const stream = await resolveStream(
+    videoId,
+    type,
+  );
+
+  if (!stream) {
+    return null;
+  }
+
+  try {
+    const res = await fetch(stream.url, {
+      headers: { accept: "*/*" },
+      cache: "no-store",
+    });
+
+    if (res.ok && res.body) {
+      return res;
+    }
+
+    console.error(
+      `[media] Stream fetch returned ${res.status}`,
+    );
+  } catch (error) {
+    console.error(
+      "[media] Stream fetch failed:",
+      error,
+    );
+  }
+
+  return null;
 }
+
 
 export function safeFileName(
   title: string,
