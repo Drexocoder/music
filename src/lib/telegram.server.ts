@@ -1,17 +1,48 @@
-/** Server-only Telegram helpers: gateway calls + message logging. */
+/** Server-only Telegram helpers: direct Bot API calls + message logging. */
 
-export const TELEGRAM_GATEWAY = "https://connector-gateway.lovable.dev/telegram";
+import { createHash } from "crypto";
+
+function botToken(): string {
+  const token = (process.env["TELEGRAM_BOT_TOKEN"] ?? process.env["TELEGRAM_API_KEY"])?.trim();
+  if (!token) {
+    throw new Error("Missing TELEGRAM_BOT_TOKEN environment variable.");
+  }
+  return token;
+}
+
+/**
+ * Telegram only accepts a secret token when it is configured with setWebhook.
+ * Keep a deterministic fallback so the webhook can be configured with one
+ * curl command, while allowing operators to rotate it independently.
+ */
+export function telegramWebhookSecret(): string {
+  const configured = process.env["TELEGRAM_WEBHOOK_SECRET"];
+  if (configured) return configured;
+  return createHash("sha256").update(`telegram-webhook:${botToken()}`).digest("base64url");
+}
+
+/** Build a Telegram-reachable origin from the public proxy headers. */
+export function publicOrigin(request: Request): string {
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || request.headers.get("host");
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const protocol = forwardedProto === "http" || forwardedProto === "https" ? forwardedProto : "https";
+  if (host) return `${protocol}://${host}`;
+  return new URL(request.url).origin.replace(/^http:/, "https:");
+}
+
+export async function telegramRequest(method: string, body: unknown) {
+  const isMultipart = typeof FormData !== "undefined" && body instanceof FormData;
+  const res = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
+    method: "POST",
+    ...(isMultipart ? {} : { headers: { "Content-Type": "application/json" } }),
+    body: (isMultipart ? body : JSON.stringify(body)) as BodyInit,
+  });
+  return res;
+}
 
 export async function tgCall(method: string, body: unknown) {
-  const res = await fetch(`${TELEGRAM_GATEWAY}/${method}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env["LOVABLE_API_KEY"]}`,
-      "X-Connection-Api-Key": `${process.env["TELEGRAM_API_KEY"]}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await telegramRequest(method, body);
   const text = await res.text();
   if (!res.ok) console.error(`Telegram ${method} failed [${res.status}]: ${text}`);
   try {
@@ -34,8 +65,9 @@ export type LogEntry = {
 
 export async function logMessage(entry: LogEntry) {
   try {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("telegram_messages").insert({
+    const { mongoCollection } = await import("@/lib/mongodb.server");
+    await (await mongoCollection("telegram_messages")).insertOne({
+      record_type: "telegram_message",
       chat_id: entry.chat_id,
       direction: entry.direction,
       text: entry.text ?? null,
@@ -44,7 +76,8 @@ export async function logMessage(entry: LogEntry) {
       telegram_user_id: entry.telegram_user_id ?? null,
       username: entry.username ?? null,
       first_name: entry.first_name ?? null,
-    } as never);
+      created_at: new Date(),
+    });
   } catch (err) {
     console.error("[telegram log]", err);
   }

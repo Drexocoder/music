@@ -120,9 +120,9 @@ async def quota():
     return await _api.status()
 
 
-# ---------------------------------------------------------------- pyrogram example
+# ---------------------------------------------------------------- Kurigram example
 #
-# from pyrogram import Client, filters
+# from kurigram import Client, filters
 # from youtube import search, download_song
 #
 # @app.on_message(filters.command("play"))

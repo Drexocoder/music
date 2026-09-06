@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { BotUserDocument, TelegramMessageDocument } from "@/lib/mongodb.server";
 
 const passcodeSchema = z.object({ passcode: z.string().min(1).max(200) });
 
@@ -44,23 +45,23 @@ export const listChats = createServerFn({ method: "POST" })
   .inputValidator((d) => passcodeSchema.parse(d))
   .handler(async ({ data }): Promise<ChatSummary[]> => {
     check(data.passcode);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rows } = await supabaseAdmin
-      .from("telegram_messages")
-      .select("chat_id, text, created_at, username, first_name")
-      .order("created_at", { ascending: false })
-      .limit(400);
+    const { mongoCollection } = await import("@/lib/mongodb.server");
+    const rows = await (await mongoCollection<TelegramMessageDocument>("telegram_messages"))
+      .find({ record_type: "telegram_message" })
+      .sort({ created_at: -1 })
+      .limit(400)
+      .toArray();
     const seen = new Map<number, ChatSummary>();
-    for (const r of (rows ?? []) as Array<Record<string, unknown>>) {
-      const id = Number(r["chat_id"]);
+    for (const r of rows) {
+      const id = Number(r.chat_id);
       if (seen.has(id)) continue;
-      const uname = r["username"] as string | null;
-      const fname = r["first_name"] as string | null;
+      const uname = r.username ?? null;
+      const fname = r.first_name ?? null;
       seen.set(id, {
         chat_id: id,
         name: uname ? `@${uname}` : (fname ?? `Chat ${id}`),
-        last_text: (r["text"] as string | null) ?? null,
-        last_at: String(r["created_at"]),
+        last_text: r.text ?? null,
+        last_at: r.created_at.toISOString(),
       });
     }
     return [...seen.values()];
@@ -78,14 +79,22 @@ export const listMessages = createServerFn({ method: "POST" })
   .inputValidator((d) => passcodeSchema.extend({ chatId: z.number() }).parse(d))
   .handler(async ({ data }): Promise<ChatMessage[]> => {
     check(data.passcode);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rows } = await supabaseAdmin
-      .from("telegram_messages")
-      .select("id, direction, text, kind, created_at")
-      .eq("chat_id", data.chatId)
-      .order("created_at", { ascending: false })
-      .limit(100);
-    return ((rows ?? []) as unknown as ChatMessage[]).slice().reverse();
+    const { mongoCollection } = await import("@/lib/mongodb.server");
+    const rows = await (await mongoCollection<TelegramMessageDocument>("telegram_messages"))
+      .find({ record_type: "telegram_message", chat_id: data.chatId })
+      .sort({ created_at: -1 })
+      .limit(100)
+      .toArray();
+    return rows
+      .slice()
+      .reverse()
+      .map((row) => ({
+        id: row._id?.toHexString() ?? "",
+        direction: row.direction,
+        text: row.text ?? null,
+        kind: row.kind ?? null,
+        created_at: row.created_at.toISOString(),
+      }));
   });
 
 export const sendMessage = createServerFn({ method: "POST" })
@@ -114,12 +123,12 @@ export const broadcast = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     check(data.passcode);
     const { tgCall, logMessage } = await import("./telegram.server");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: rows } = await supabaseAdmin
-      .from("bot_users")
-      .select("telegram_id")
-      .limit(2000);
-    const ids = ((rows ?? []) as Array<Record<string, unknown>>).map((r) => Number(r["telegram_id"]));
+    const { mongoCollection } = await import("@/lib/mongodb.server");
+    const rows = await (await mongoCollection<BotUserDocument>("bot_users"))
+      .find({ record_type: "bot_user" })
+      .limit(2000)
+      .toArray();
+    const ids = rows.map((row) => Number(row.telegram_id));
     let sent = 0;
     for (const id of ids) {
       const res = await tgCall("sendMessage", {
