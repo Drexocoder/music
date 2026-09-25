@@ -674,35 +674,9 @@ export async function fetchMedia(
     }
   }
 
-  const stream = await resolveStream(
-    videoId,
-    type,
-  );
-
-  if (!stream) {
-    return null;
-  }
-
-  try {
-    const res = await fetch(stream.url, {
-      headers: { accept: "*/*" },
-      cache: "no-store",
-    });
-
-    if (res.ok && res.body) {
-      return res;
-    }
-
-    console.error(
-      `[media] Stream fetch returned ${res.status}`,
-    );
-  } catch (error) {
-    console.error(
-      "[media] Stream fetch failed:",
-      error,
-    );
-  }
-
+  // Do not silently switch to third-party stream mirrors for production
+  // downloads. Their availability and stream URLs are outside our control
+  // and were the source of intermittent 403/502 playback failures.
   return null;
 }
 
