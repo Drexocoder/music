@@ -1,10 +1,27 @@
+"""Aurora downloader service.
+
+Long-running yt-dlp sidecar used by Replit/local development and by the
+Vercel container service. It always produces real files:
+
+* ``type=audio`` -> MP3 (via ffmpeg)
+* ``type=video`` -> MP4 (merged/remuxed via ffmpeg)
+
+Endpoints:
+    GET /health
+    GET /api/download/health
+    GET /download?id=<video id>&type=audio|video
+    GET /api/download/<video id>?type=audio|video
+"""
+
 import base64
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import quote
@@ -19,34 +36,38 @@ YOUTUBE_COOKIES_B64 = os.environ.get("YOUTUBE_COOKIES_B64", "")
 YOUTUBE_COOKIES_TEXT = os.environ.get("YOUTUBE_COOKIES", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
+# Total wall-clock budget for one download request. The container is not
+# limited by a serverless timeout, but we still want a bounded request.
+DOWNLOAD_TIMEOUT_SECONDS = float(
+    os.environ.get("DOWNLOAD_TIMEOUT_SECONDS", "900")
+)
+
+MEDIA_TYPES = {
+    "audio": {
+        "extension": ".mp3",
+        "content_type": "audio/mpeg",
+        "label": "MP3 audio",
+    },
+    "video": {
+        "extension": ".mp4",
+        "content_type": "video/mp4",
+        "label": "MP4 video",
+    },
+}
+
 
 # =========================================================
 # JSON RESPONSE
 # =========================================================
 
 def send_json(handler, status, data):
-    body = json.dumps(
-        data,
-        ensure_ascii=False
-    ).encode("utf-8")
+    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
     handler.send_response(status)
-
-    handler.send_header(
-        "Content-Type",
-        "application/json; charset=utf-8"
-    )
-
-    handler.send_header(
-        "Content-Length",
-        str(len(body))
-    )
-
-    handler.send_header(
-        "Cache-Control",
-        "no-store"
-    )
-
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
 
     try:
@@ -61,19 +82,8 @@ def send_json(handler, status, data):
 
 def safe_filename(filename, extension):
     filename = os.path.basename(filename)
-
-    filename = re.sub(
-        r"[\r\n\t]",
-        " ",
-        filename
-    )
-
-    filename = re.sub(
-        r'[<>:"/\\|?*\x00-\x1f]',
-        "_",
-        filename
-    )
-
+    filename = re.sub(r"[\r\n\t]", " ", filename)
+    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename)
     filename = filename.strip(" .")
 
     if not filename:
@@ -87,24 +97,9 @@ def safe_filename(filename, extension):
 
 def ascii_filename(filename, extension):
     name_without_extension = os.path.splitext(filename)[0]
-
-    ascii_name = (
-        name_without_extension
-        .encode("ascii", "ignore")
-        .decode("ascii")
-    )
-
-    ascii_name = re.sub(
-        r"[^A-Za-z0-9._ -]",
-        "_",
-        ascii_name
-    )
-
-    ascii_name = re.sub(
-        r"\s+",
-        " ",
-        ascii_name
-    ).strip(" .")
+    ascii_name = name_without_extension.encode("ascii", "ignore").decode("ascii")
+    ascii_name = re.sub(r"[^A-Za-z0-9._ -]", "_", ascii_name)
+    ascii_name = re.sub(r"\s+", " ", ascii_name).strip(" .")
 
     if not ascii_name:
         ascii_name = "aurora-download"
@@ -112,22 +107,121 @@ def ascii_filename(filename, extension):
     return ascii_name + extension
 
 
+def content_disposition(filename, extension):
+    fallback = ascii_filename(filename, extension)
+    encoded = quote(filename, safe="")
+    return (
+        f'attachment; filename="{fallback}"; '
+        f"filename*=UTF-8''{encoded}"
+    )
+
+
 # =========================================================
 # VIDEO ID
 # =========================================================
 
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def normalize_target(raw):
+    """Return a YouTube URL for an id or a validated watch URL."""
+    raw = (raw or "").strip()
+
+    if not raw:
+        return ""
+
+    if VIDEO_ID_RE.match(raw):
+        return "https://www.youtube.com/watch?v=" + raw
+
+    try:
+        parsed = urllib.parse.urlparse(raw)
+
+        if parsed.scheme not in ("http", "https"):
+            return ""
+
+        host = (parsed.hostname or "").lower()
+
+        if not (
+            host.endswith("youtube.com")
+            or host.endswith("youtube-nocookie.com")
+            or host == "youtu.be"
+        ):
+            return ""
+
+        return raw
+    except Exception:
+        return ""
+
+
 def extract_path_video_id(path):
-    prefix = "/api/download/"
+    for prefix in ("/api/download/", "/download/"):
+        if not path.startswith(prefix):
+            continue
 
-    if not path.startswith(prefix):
-        return ""
+        video_id = path[len(prefix):].strip("/").strip()
 
-    video_id = path[len(prefix):].strip("/").strip()
+        if video_id and video_id != "health":
+            return urllib.parse.unquote(video_id)
 
-    if not video_id:
-        return ""
+    return ""
 
-    return urllib.parse.unquote(video_id).strip()
+
+# =========================================================
+# RUNTIME DISCOVERY
+# =========================================================
+
+def ytdlp_command():
+    """Return the base command used to run yt-dlp, or None."""
+    explicit = os.environ.get("YTDLP_PATH", "").strip()
+
+    if explicit:
+        return [explicit]
+
+    found = shutil.which("yt-dlp")
+
+    if found:
+        return [found]
+
+    try:
+        import yt_dlp  # noqa: F401
+
+        return [sys.executable, "-m", "yt_dlp"]
+    except Exception:
+        return None
+
+
+def ffmpeg_location():
+    """Return an ffmpeg binary path understood by --ffmpeg-location."""
+    explicit = os.environ.get("FFMPEG_LOCATION", "").strip()
+
+    if explicit and os.path.exists(explicit):
+        return explicit
+
+    found = shutil.which("ffmpeg")
+
+    if found:
+        return found
+
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def js_runtime():
+    """Pick an installed JavaScript runtime for yt-dlp's EJS challenges."""
+    explicit = os.environ.get("YTDLP_JS_RUNTIME", "").strip()
+
+    if explicit:
+        return explicit
+
+    for candidate in ("deno", "node", "bun"):
+        if shutil.which(candidate):
+            return candidate
+
+    return None
 
 
 # =========================================================
@@ -135,14 +229,10 @@ def extract_path_video_id(path):
 # =========================================================
 
 def create_cookie_file(temp_dir):
-
     if not YOUTUBE_COOKIES_B64 and not YOUTUBE_COOKIES_TEXT:
         return None
 
-    cookies_file = os.path.join(
-        temp_dir,
-        "cookies.txt"
-    )
+    cookies_file = os.path.join(temp_dir, "cookies.txt")
 
     try:
         if YOUTUBE_COOKIES_B64:
@@ -159,7 +249,7 @@ def create_cookie_file(temp_dir):
                 cookie_bytes = base64.b64decode(
                     encoded,
                     altchars=b"-_",
-                    validate=True
+                    validate=True,
                 )
             except Exception:
                 # Some exporters omit padding or use URL-safe base64.
@@ -172,30 +262,122 @@ def create_cookie_file(temp_dir):
             cookie_bytes = YOUTUBE_COOKIES_TEXT.encode("utf-8")
 
         if not cookie_bytes:
-            raise ValueError(
-                "Cookie data is empty"
-            )
+            raise ValueError("Cookie data is empty")
 
-        with open(
-            cookies_file,
-            "wb"
-        ) as cookie_handle:
-
-            cookie_handle.write(
-                cookie_bytes
-            )
+        with open(cookies_file, "wb") as cookie_handle:
+            cookie_handle.write(cookie_bytes)
 
         return cookies_file
 
     except Exception as exc:
+        print("Failed to prepare YouTube cookies:", repr(exc), flush=True)
+        return None
 
-        print(
-            "Failed to prepare YouTube cookies:",
-            repr(exc),
-            flush=True
+
+# =========================================================
+# YT-DLP PROFILES
+# =========================================================
+
+def download_profiles(has_cookies):
+    """Independent extraction profiles.
+
+    YouTube can accept one client while rejecting another from the same IP.
+    Cookies are the most reliable way through the data-center bot check, so
+    authenticated profiles run first when a cookie file exists.
+    """
+    profiles = []
+
+    if has_cookies:
+        profiles.extend(
+            [
+                # Let yt-dlp choose its current default clients first; the
+                # default selection tracks YouTube changes best.
+                {"name": "default_with_cookies", "clients": None, "cookies": True},
+                {"name": "web_safari_with_cookies", "clients": "web_safari", "cookies": True},
+            ]
         )
 
-        return None
+    profiles.extend(
+        [
+            {"name": "default", "clients": None, "cookies": False},
+            {"name": "tv", "clients": "tv", "cookies": False},
+            {"name": "android_vr", "clients": "android_vr", "cookies": False},
+            {"name": "web_embedded", "clients": "web_embedded", "cookies": False},
+        ]
+    )
+
+    return profiles
+
+
+def build_command(profile, media_type, target, output_template, cookies_file):
+    command = [*YTDLP]
+
+    command.extend(
+        [
+            "--no-playlist",
+            "--no-warnings",
+            "--no-progress",
+            # Data-center networks frequently get IPv6 403s from YouTube.
+            "--force-ipv4",
+            "--socket-timeout",
+            "20",
+            "--retries",
+            "3",
+            "--fragment-retries",
+            "3",
+            "--retry-sleep",
+            "http:exp=1:20",
+            "--output",
+            output_template,
+        ]
+    )
+
+    if profile["clients"]:
+        command.extend(
+            [
+                "--extractor-args",
+                f"youtube:player_client={profile['clients']}",
+            ]
+        )
+
+    if JS_RUNTIME:
+        command.extend(["--js-runtimes", JS_RUNTIME])
+
+    if FFMPEG:
+        command.extend(["--ffmpeg-location", FFMPEG])
+
+    if profile["cookies"] and cookies_file:
+        command.extend(["--cookies", cookies_file])
+
+    if media_type == "video":
+        command.extend(
+            [
+                "--format",
+                (
+                    "bv*[ext=mp4][vcodec^=avc1][height<=1080]+ba[ext=m4a]"
+                    "/bv*[ext=mp4][height<=1080]+ba[ext=m4a]"
+                    "/b[ext=mp4][height<=1080]"
+                    "/b[ext=mp4]"
+                    "/bv*+ba/b"
+                ),
+                "--merge-output-format",
+                "mp4",
+            ]
+        )
+    else:
+        command.extend(
+            [
+                "--extract-audio",
+                "--audio-format",
+                "mp3",
+                "--audio-quality",
+                "5",
+            ]
+        )
+
+    command.append(target)
+
+    return command
 
 
 # =========================================================
@@ -204,296 +386,184 @@ def create_cookie_file(temp_dir):
 
 class DownloadHandler(BaseHTTPRequestHandler):
 
-    server_version = "AuroraDownloader/2.0"
+    server_version = "AuroraDownloader/3.0"
 
     def log_message(self, format, *args):
+        print(format % args, flush=True)
 
-        print(
-            format % args,
-            flush=True
+    # -----------------------------------------------------
+    # HELPERS
+    # -----------------------------------------------------
+
+    def send_media(self, file_path, media_type, filename):
+        file_size = os.path.getsize(file_path)
+
+        self.send_response(200)
+        self.send_header("Content-Type", media_type["content_type"])
+        self.send_header(
+            "Content-Disposition",
+            content_disposition(filename, media_type["extension"]),
         )
+        self.send_header("Content-Length", str(file_size))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Aurora-Format", media_type["extension"].lstrip("."))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        with open(file_path, "rb") as file:
+            while True:
+                chunk = file.read(1024 * 1024)
+
+                if not chunk:
+                    break
+
+                try:
+                    self.wfile.write(chunk)
+                except BrokenPipeError:
+                    print("Client disconnected during download", flush=True)
+                    break
+
+    # -----------------------------------------------------
+    # GET
+    # -----------------------------------------------------
 
     def do_GET(self):
-
-        parsed = urllib.parse.urlparse(
-            self.path
-        )
-
+        parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        # =====================================================
-        # HEALTH CHECK
-        # =====================================================
-
-        if path in (
-            "/health",
-            "/api/download/health"
-        ):
-
+        # Health check.
+        if path in ("/health", "/api/download/health"):
             send_json(
                 self,
                 200,
                 {
                     "ok": True,
                     "service": "aurora-download",
-
-                    "yt_dlp": (
-                        shutil.which("yt-dlp")
-                        is not None
-                    ),
-
-                    "ffmpeg": (
-                        shutil.which("ffmpeg")
-                        is not None
-                    ),
-
-                    "deno": (
-                        shutil.which("deno")
-                        is not None
-                    ),
-
+                    "yt_dlp": bool(YTDLP),
+                    "ffmpeg": bool(FFMPEG),
+                    "js_runtime": JS_RUNTIME,
                     "cookies_configured": bool(
-                        YOUTUBE_COOKIES_B64
-                    )
-                }
+                        YOUTUBE_COOKIES_B64 or YOUTUBE_COOKIES_TEXT
+                    ),
+                    "formats": ["mp3", "mp4"],
+                },
             )
-
             return
 
-        # =====================================================
-        # DOWNLOAD ROUTES
-        # =====================================================
-
         valid_download_path = (
-            path == "/download"
-            or path == "/download/"
+            path in ("/download", "/download/")
             or (
-                path.startswith(
-                    "/api/download/"
-                )
+                path.startswith("/api/download/")
                 and path != "/api/download/health"
             )
         )
 
         if not valid_download_path:
-
-            send_json(
-                self,
-                404,
-                {
-                    "error": "Not found"
-                }
-            )
-
+            send_json(self, 404, {"error": "Not found"})
             return
 
-        # =====================================================
-        # API KEY
-        # =====================================================
-
+        # API key.
         if API_KEY:
-
-            supplied_key = self.headers.get(
-                "x-api-key",
-                ""
-            )
+            supplied_key = self.headers.get("x-api-key", "")
 
             if supplied_key != API_KEY:
-
-                send_json(
-                    self,
-                    401,
-                    {
-                        "error": "Unauthorized"
-                    }
-                )
-
+                send_json(self, 401, {"error": "Unauthorized"})
                 return
 
-        # =====================================================
-        # QUERY PARAMETERS
-        # =====================================================
+        # Query parameters.
+        query = urllib.parse.parse_qs(parsed.query)
 
-        query = urllib.parse.parse_qs(
-            parsed.query
-        )
+        video_id = query.get("id", [""])[0].strip()
+        youtube_url = query.get("url", [""])[0].strip()
+        media_type_name = query.get("type", [""])[0].lower().strip()
 
-        video_id = query.get(
-            "id",
-            [""]
-        )[0].strip()
+        # Support ?format=mp3|mp4 as an alias for type.
+        if not media_type_name:
+            fmt = query.get("format", [""])[0].lower().strip()
+            media_type_name = {
+                "mp3": "audio",
+                "mp4": "video",
+            }.get(fmt, "")
 
-        youtube_url = query.get(
-            "url",
-            [""]
-        )[0].strip()
+        if not media_type_name:
+            media_type_name = "audio"
 
-        media_type = query.get(
-            "type",
-            ["audio"]
-        )[0].lower().strip()
-
-        # =====================================================
-        # PATH VIDEO ID
-        # =====================================================
-
+        # Path style: /api/download/<id>
         if not video_id and not youtube_url:
+            video_id = extract_path_video_id(path)
 
-            path_video_id = (
-                extract_path_video_id(path)
-            )
+        target = normalize_target(video_id or youtube_url)
 
-            if path_video_id:
-
-                video_id = path_video_id
-
-        # =====================================================
-        # VALIDATION
-        # =====================================================
-
-        if not video_id and not youtube_url:
-
+        if not target:
             send_json(
                 self,
                 400,
                 {
                     "error": (
-                        "Missing video id or URL"
+                        "Missing or invalid YouTube id/URL"
                     )
-                }
+                },
             )
-
             return
 
-        if media_type not in (
-            "audio",
-            "video"
-        ):
-
+        if media_type_name not in MEDIA_TYPES:
             send_json(
                 self,
                 400,
-                {
-                    "error": (
-                        "type must be audio or video"
-                    )
-                }
+                {"error": "type must be audio or video"},
             )
-
             return
 
-        # =====================================================
-        # BUILD YOUTUBE URL
-        # =====================================================
+        media_type = MEDIA_TYPES[media_type_name]
 
-        if video_id:
-
-            youtube_url = (
-                "https://www.youtube.com/watch?v="
-                + urllib.parse.quote(
-                    video_id,
-                    safe=""
-                )
+        if not YTDLP:
+            send_json(
+                self,
+                503,
+                {
+                    "error": "yt-dlp is not installed on the downloader service",
+                    "details": (
+                        'Install it with: python -m pip install "yt-dlp[default]"'
+                    ),
+                },
             )
+            return
 
-        # =====================================================
-        # TEMP DIRECTORY
-        # =====================================================
+        if not FFMPEG:
+            send_json(
+                self,
+                503,
+                {
+                    "error": "ffmpeg is not installed on the downloader service",
+                    "details": (
+                        "MP3 conversion and MP4 merging require ffmpeg. "
+                        "Install ffmpeg or the imageio-ffmpeg Python package."
+                    ),
+                },
+            )
+            return
 
-        temp_dir = tempfile.mkdtemp(
-            prefix="aurora-"
-        )
+        temp_dir = tempfile.mkdtemp(prefix="aurora-")
+        started = time.monotonic()
 
         try:
-
-            # =================================================
-            # COOKIES
-            # =================================================
-
-            cookies_file = (
-                create_cookie_file(temp_dir)
-            )
-
-            # =================================================
-            # OUTPUT
-            # =================================================
-
+            cookies_file = create_cookie_file(temp_dir)
             output_template = os.path.join(
                 temp_dir,
-                "%(title).120s.%(ext)s"
+                "%(title).120s.%(ext)s",
             )
 
-            # =================================================
-            # YOUTUBE DOWNLOAD STRATEGY
-            # =================================================
-            #
-            # YouTube can return a format that extracts correctly but
-            # later returns HTTP 403 when the actual media URL is fetched.
-            # This is currently a known yt-dlp/YouTube failure mode.
-            #
-            # We therefore try a small set of independent extraction
-            # profiles instead of failing the whole request immediately.
-            #
-            # IMPORTANT:
-            # - First try authenticated clients when supplied cookies exist.
-            # - Then try logged-out clients as a fallback.
-            # - Force IPv4 because YouTube 403s are also reported on some
-            #   IPv6/data-center routes.
-            # =================================================
-
-            if media_type == "audio":
-                expected_extension = ".mp3"
-                content_type = "audio/mpeg"
-            else:
-                expected_extension = ".mp4"
-                content_type = "video/mp4"
-
-            profiles = []
-
-            # An exported browser session is the most reliable way through
-            # YouTube's data-center bot check. Try it first when configured,
-            # using a few clients because YouTube can reject one while
-            # accepting another with the same session.
-            if cookies_file:
-                profiles.extend(
-                    [
-                        {
-                            "name": "default_with_cookies",
-                            "clients": "default",
-                            "cookies": True,
-                        },
-                        {
-                            "name": "web_embedded_with_cookies",
-                            "clients": "web_embedded",
-                            "cookies": True,
-                        },
-                        {
-                            "name": "web_safari_with_cookies",
-                            "clients": "web_safari",
-                            "cookies": True,
-                        },
-                    ]
-                )
-
-            profiles.extend(
-                [
-                    {
-                        "name": "web_embedded_no_cookies",
-                        "clients": "web_embedded",
-                        "cookies": False,
-                    },
-                    {
-                        "name": "android_vr_no_cookies",
-                        "clients": "android_vr",
-                        "cookies": False,
-                    },
-                ]
-            )
-
+            profiles = download_profiles(bool(cookies_file))
             result = None
             successful_attempt = None
+            details = ""
 
             for attempt_number, profile in enumerate(profiles, start=1):
+                remaining = DOWNLOAD_TIMEOUT_SECONDS - (time.monotonic() - started)
+
+                if remaining < 10:
+                    details = "Download time budget exhausted."
+                    break
 
                 # Remove files produced by a previous failed attempt.
                 for old_filename in os.listdir(temp_dir):
@@ -505,128 +575,25 @@ class DownloadHandler(BaseHTTPRequestHandler):
                         except OSError:
                             pass
 
-                youtube_options = [
-                    "yt-dlp",
-
-                    "--no-playlist",
-
-                    # Explicit JavaScript runtime.
-                    "--js-runtimes",
-                    "deno",
-
-                    # Current YouTube client workaround.
-                    "--extractor-args",
-                    f"youtube:player_client={profile['clients']}",
-
-                    # Prefer IPv4 on Vercel/data-center networking.
-                    "--force-ipv4",
-
-                    # Give transient 403/network failures a chance to
-                    # recover without hanging the request indefinitely.
-                    "--retries",
-                    "3",
-                    "--fragment-retries",
-                    "3",
-                    "--retry-sleep",
-                    "http:exp=1:20",
-
-                    "--no-warnings",
-                    "--no-progress",
-
-                    # Do not continue trying alternate formats after a
-                    # single unavailable format. The next profile handles
-                    # client changes explicitly.
-                    "--no-abort-on-error",
-
-                    "--output",
+                command = build_command(
+                    profile,
+                    media_type_name,
+                    target,
                     output_template,
-                ]
-
-                # For video, prefer separate MP4 video/audio streams and
-                # fall back to a single MP4 stream when that is all the
-                # selected YouTube client exposes.
-                if media_type == "video":
-                    youtube_options.extend(
-                        [
-                            "--format",
-                            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                            "--merge-output-format",
-                            "mp4",
-                        ]
-                    )
-                else:
-                    youtube_options.extend(
-                        [
-                            "--extract-audio",
-                            "--audio-format",
-                            "mp3",
-                            "--audio-quality",
-                            "5",
-                        ]
-                    )
-
-                # Only attach cookies to the profiles that explicitly
-                # require them. This is important because YouTube can treat
-                # a browser session differently from a Vercel IP.
-                if profile["cookies"] and cookies_file:
-                    youtube_options.extend(
-                        [
-                            "--cookies",
-                            cookies_file,
-                        ]
-                    )
-
-                command = [
-                    *youtube_options,
-                    youtube_url,
-                ]
-
-                print(
-                    "========================================",
-                    flush=True,
+                    cookies_file,
                 )
 
+                print("========================================", flush=True)
                 print(
                     f"Aurora download attempt {attempt_number}/{len(profiles)}",
                     flush=True,
                 )
-
-                print(
-                    "Profile:",
-                    profile["name"],
-                    flush=True,
-                )
-
-                print(
-                    "URL:",
-                    youtube_url,
-                    flush=True,
-                )
-
-                print(
-                    "Type:",
-                    media_type,
-                    flush=True,
-                )
-
-                print(
-                    "yt-dlp:",
-                    shutil.which("yt-dlp") or "NOT FOUND",
-                    flush=True,
-                )
-
-                print(
-                    "ffmpeg:",
-                    shutil.which("ffmpeg") or "NOT FOUND",
-                    flush=True,
-                )
-
-                print(
-                    "Deno:",
-                    shutil.which("deno") or "NOT FOUND",
-                    flush=True,
-                )
-
+                print("Profile:", profile["name"], flush=True)
+                print("URL:", target, flush=True)
+                print("Type:", media_type_name, flush=True)
+                print("yt-dlp:", YTDLP[0], flush=True)
+                print("ffmpeg:", FFMPEG or "NOT FOUND", flush=True)
+                print("JS runtime:", JS_RUNTIME or "NOT FOUND", flush=True)
                 print(
                     "Cookies:",
                     "enabled"
@@ -636,35 +603,18 @@ class DownloadHandler(BaseHTTPRequestHandler):
                 )
 
                 safe_command = [
-                    str(x)
+                    "<cookies>" if x == cookies_file else str(x)
                     for x in command
                 ]
-
-                if cookies_file:
-                    safe_command = [
-                        "<cookies>"
-                        if x == cookies_file
-                        else x
-                        for x in safe_command
-                    ]
-
-                print(
-                    "Command:",
-                    " ".join(safe_command),
-                    flush=True,
-                )
-
-                print(
-                    "========================================",
-                    flush=True,
-                )
+                print("Command:", " ".join(safe_command), flush=True)
+                print("========================================", flush=True)
 
                 try:
                     result = subprocess.run(
                         command,
                         capture_output=True,
                         text=True,
-                        timeout=1500,
+                        timeout=min(remaining, DOWNLOAD_TIMEOUT_SECONDS),
                     )
                 except subprocess.TimeoutExpired as exc:
                     result = subprocess.CompletedProcess(
@@ -674,8 +624,6 @@ class DownloadHandler(BaseHTTPRequestHandler):
                         f"Download attempt timed out: {exc}",
                     )
 
-                # Log output for every attempt so Vercel logs tell us
-                # exactly which YouTube profile succeeded or failed.
                 if result.stdout.strip():
                     print(
                         f"yt-dlp stdout (attempt {attempt_number}):",
@@ -699,6 +647,11 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     )
                     break
 
+                details = (
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or details
+                )
                 print(
                     "yt-dlp attempt failed:",
                     profile["name"],
@@ -707,409 +660,121 @@ class DownloadHandler(BaseHTTPRequestHandler):
                     flush=True,
                 )
 
-            # =================================================
-            # FAILURE
-            # =================================================
-
             if result is None or result.returncode != 0:
-
-                details = (
-                    result.stderr.strip()
-                    if result is not None
-                    else ""
-                ) or (
-                    result.stdout.strip()
-                    if result is not None
-                    else ""
-                ) or "Unknown yt-dlp error"
-
-                print(
-                    "All yt-dlp download profiles failed:",
-                    details,
-                    flush=True,
-                )
-
                 send_json(
                     self,
-                    502,
+                    504
+                    if result is not None and result.returncode == 124
+                    else 502,
                     {
                         "error": "yt-dlp download failed",
-                        "details": details[-6000:],
+                        "details": (details or "Unknown yt-dlp error")[-6000:],
                     },
                 )
-
                 return
 
-            print(
-                "Successful profile:",
-                successful_attempt or "unknown",
-                flush=True,
-            )
+            print("Successful profile:", successful_attempt or "unknown", flush=True)
 
-            # =================================================
-            # OUTPUT LOGS
-            # =================================================
-
-            if result.stdout.strip():
-
-                print(
-                    "yt-dlp stdout:",
-                    result.stdout[-8000:],
-                    flush=True
-                )
-
-            if result.stderr.strip():
-
-                print(
-                    "yt-dlp stderr:",
-                    result.stderr[-8000:],
-                    flush=True
-                )
-
-            # =================================================
-            # FAILURE
-            # =================================================
-
-            if result.returncode != 0:
-
-                details = (
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or "Unknown yt-dlp error"
-                )
-
-                print(
-                    "yt-dlp failed:",
-                    details,
-                    flush=True
-                )
-
-                send_json(
-                    self,
-                    502,
-                    {
-                        "error": (
-                            "yt-dlp download failed"
-                        ),
-                        "details": details[-6000:]
-                    }
-                )
-
-                return
-
-            # =================================================
-            # FIND OUTPUT FILE
-            # =================================================
-
-            files = []
-
-            for filename in os.listdir(
-                temp_dir
-            ):
-
-                file_path = os.path.join(
-                    temp_dir,
-                    filename
-                )
-
-                if os.path.isfile(
-                    file_path
-                ):
-
-                    files.append(
-                        file_path
-                    )
-
-            if not files:
-
-                send_json(
-                    self,
-                    502,
-                    {
-                        "error": (
-                            "yt-dlp completed "
-                            "but produced no file"
-                        )
-                    }
-                )
-
-                return
-
-            # =================================================
-            # SELECT OUTPUT
-            # =================================================
+            # Find the produced file. Only the expected extension is valid:
+            # returning an m4a/webm stream labelled as MP3/MP4 would corrupt
+            # the file for the user.
+            expected_extension = media_type["extension"]
+            files = [
+                os.path.join(temp_dir, filename)
+                for filename in os.listdir(temp_dir)
+                if os.path.isfile(os.path.join(temp_dir, filename))
+            ]
 
             matching_files = [
                 file_path
                 for file_path in files
-                if file_path.lower().endswith(
-                    expected_extension.lower()
-                )
+                if file_path.lower().endswith(expected_extension.lower())
             ]
 
-            if matching_files:
-
-                file_path = (
-                    matching_files[0]
-                )
-
-            else:
-
-                file_path = files[0]
-
-            # =================================================
-            # FILE INFORMATION
-            # =================================================
-
-            original_filename = (
-                os.path.basename(file_path)
-            )
-
-            filename = safe_filename(
-                original_filename,
-                expected_extension
-            )
-
-            fallback_filename = (
-                ascii_filename(
-                    filename,
-                    expected_extension
-                )
-            )
-
-            encoded_filename = quote(
-                filename,
-                safe=""
-            )
-
-            file_size = os.path.getsize(
-                file_path
-            )
-
-            if file_size <= 0:
-
+            if not matching_files:
                 send_json(
                     self,
                     502,
                     {
                         "error": (
-                            "Downloaded file "
-                            "is empty"
-                        )
-                    }
+                            f"yt-dlp did not produce an {expected_extension} file"
+                        ),
+                        "details": (
+                            "Produced files: "
+                            + ", ".join(os.path.basename(f) for f in files)
+                        )[-6000:],
+                    },
                 )
-
                 return
 
-            # =================================================
-            # RESPONSE
-            # =================================================
+            file_path = matching_files[0]
+            file_size = os.path.getsize(file_path)
 
-            self.send_response(200)
+            if file_size <= 0:
+                send_json(self, 502, {"error": "Downloaded file is empty"})
+                return
 
-            self.send_header(
-                "Content-Type",
-                content_type
-            )
-
-            self.send_header(
-                "Content-Disposition",
-                (
-                    "attachment; "
-                    f'filename="{fallback_filename}"; '
-                    f"filename*=UTF-8''{encoded_filename}"
-                )
-            )
-
-            self.send_header(
-                "Content-Length",
-                str(file_size)
-            )
-
-            self.send_header(
-                "Cache-Control",
-                "no-store"
-            )
-
-            self.send_header(
-                "X-Aurora-Downloader",
-                "1"
-            )
-
-            self.end_headers()
-
-            # =================================================
-            # STREAM
-            # =================================================
-
-            with open(
-                file_path,
-                "rb"
-            ) as file:
-
-                while True:
-
-                    chunk = file.read(
-                        1024 * 1024
-                    )
-
-                    if not chunk:
-                        break
-
-                    try:
-
-                        self.wfile.write(
-                            chunk
-                        )
-
-                    except BrokenPipeError:
-
-                        print(
-                            "Client disconnected "
-                            "during download",
-                            flush=True
-                        )
-
-                        break
+            original_filename = os.path.basename(file_path)
+            filename = safe_filename(original_filename, expected_extension)
 
             print(
                 "Download completed:",
                 filename,
-                flush=True
+                f"({file_size} bytes)",
+                flush=True,
             )
 
-        # =====================================================
-        # TIMEOUT
-        # =====================================================
-
-        except subprocess.TimeoutExpired:
-
-            print(
-                "yt-dlp timed out",
-                flush=True
-            )
-
-            send_json(
-                self,
-                504,
-                {
-                    "error": (
-                        "Download timed out"
-                    )
-                }
-            )
-
-        # =====================================================
-        # CLIENT DISCONNECT
-        # =====================================================
+            self.send_media(file_path, media_type, filename)
 
         except BrokenPipeError:
-
-            print(
-                "Client disconnected",
-                flush=True
-            )
-
-        # =====================================================
-        # GENERAL ERROR
-        # =====================================================
+            print("Client disconnected", flush=True)
 
         except Exception as exc:
-
-            print(
-                "Download server error:",
-                repr(exc),
-                flush=True
-            )
+            print("Download server error:", repr(exc), flush=True)
 
             try:
-
                 send_json(
                     self,
                     500,
                     {
-                        "error": (
-                            "Internal download error"
-                        ),
-                        "details": str(exc)
-                    }
+                        "error": "Internal download error",
+                        "details": str(exc),
+                    },
                 )
-
             except Exception:
                 pass
 
-        # =====================================================
-        # CLEANUP
-        # =====================================================
-
         finally:
-
-            shutil.rmtree(
-                temp_dir,
-                ignore_errors=True
-            )
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # =========================================================
 # SERVER
 # =========================================================
 
+YTDLP = ytdlp_command()
+FFMPEG = ffmpeg_location()
+JS_RUNTIME = js_runtime()
+
+
 def main():
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), DownloadHandler)
 
-    server = ThreadingHTTPServer(
-        ("0.0.0.0", PORT),
-        DownloadHandler
-    )
-
-    print(
-        "========================================",
-        flush=True
-    )
-
-    print(
-        "Aurora downloader starting",
-        flush=True
-    )
-
-    print(
-        "Port:",
-        PORT,
-        flush=True
-    )
-
-    print(
-        "yt-dlp:",
-        shutil.which("yt-dlp")
-        or "NOT FOUND",
-        flush=True
-    )
-
-    print(
-        "ffmpeg:",
-        shutil.which("ffmpeg")
-        or "NOT FOUND",
-        flush=True
-    )
-
-    print(
-        "deno:",
-        shutil.which("deno")
-        or "NOT FOUND",
-        flush=True
-    )
-
+    print("========================================", flush=True)
+    print("Aurora downloader starting", flush=True)
+    print("Port:", PORT, flush=True)
+    print("yt-dlp:", " ".join(YTDLP) if YTDLP else "NOT FOUND", flush=True)
+    print("ffmpeg:", FFMPEG or "NOT FOUND", flush=True)
+    print("JS runtime:", JS_RUNTIME or "NOT FOUND", flush=True)
     print(
         "cookies:",
         "configured"
         if YOUTUBE_COOKIES_B64 or YOUTUBE_COOKIES_TEXT
         else "NOT CONFIGURED",
-        flush=True
+        flush=True,
     )
-
-    print(
-        "========================================",
-        flush=True
-    )
+    print("formats: mp3, mp4", flush=True)
+    print("========================================", flush=True)
 
     server.serve_forever()
 

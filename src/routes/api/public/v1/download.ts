@@ -7,7 +7,9 @@ export const Route = createFileRoute("/api/public/v1/download")({
         const url = new URL(request.url);
         const key = url.searchParams.get("api_key") ?? url.searchParams.get("key") ?? "";
         const target = url.searchParams.get("url") ?? url.searchParams.get("id") ?? "";
-        const type = url.searchParams.get("type") === "video" ? "video" : "audio";
+        const requestedFormat =
+          url.searchParams.get("type") ?? url.searchParams.get("format");
+        const type = requestedFormat === "video" || requestedFormat === "mp4" ? "video" : "audio";
 
         if (!key || !target) {
           return Response.json(
@@ -34,6 +36,7 @@ export const Route = createFileRoute("/api/public/v1/download")({
 
         const upstream = await fetchMedia(videoId, type, {
           downloaderOrigin: new URL(request.url).origin,
+          allowOriginProxy: true,
         });
         if (!upstream || !upstream.body) {
           return Response.json({ ok: false, error: "Download failed." }, { status: 502 });
@@ -41,8 +44,19 @@ export const Route = createFileRoute("/api/public/v1/download")({
 
         const meta = await ytMeta(videoId);
         const ext = type === "video" ? "mp4" : "mp3";
+        const upstreamContentType = (upstream.headers.get("content-type") ?? "")
+          .trim()
+          .toLowerCase();
         const headers = new Headers();
-        headers.set("content-type", type === "video" ? "video/mp4" : "audio/mpeg");
+        headers.set(
+          "content-type",
+          upstreamContentType.startsWith("audio/") ||
+            upstreamContentType.startsWith("video/")
+            ? upstreamContentType
+            : type === "video"
+              ? "video/mp4"
+              : "audio/mpeg",
+        );
         headers.set(
           "content-disposition",
           `attachment; filename="${safeFileName(meta?.title ?? videoId, ext)}"`,
@@ -51,6 +65,7 @@ export const Route = createFileRoute("/api/public/v1/download")({
         if (len) headers.set("content-length", len);
         headers.set("cache-control", "no-store");
         headers.set("access-control-allow-origin", "*");
+        headers.set("x-aurora-format", ext);
         headers.set("x-quota-used-today", String(quota.used_today));
         headers.set("x-quota-used-month", String(quota.used_month));
 

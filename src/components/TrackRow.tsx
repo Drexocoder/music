@@ -63,7 +63,7 @@ export function TrackRow({
         </span>
       )}
 
-      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <div className="flex items-center gap-1 opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
         <button
           onClick={() => toggleFavorite(track)}
           aria-label="Like"

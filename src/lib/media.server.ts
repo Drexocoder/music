@@ -423,12 +423,56 @@ function localDownloaderEnabled(): boolean {
   );
 }
 
+/**
+ * The `/api/download/*` rewrite to the downloader container only exists on
+ * Vercel (see vercel.json). On other hosts calling our own origin would hit
+ * this same route again, so the origin proxy is opt-in there.
+ */
+function downloadProxyEnabled(): boolean {
+  const configured =
+    process.env["DOWNLOAD_PROXY_ENABLED"]
+      ?.trim()
+      .toLowerCase();
+
+  if (configured === "true" || configured === "1") {
+    return true;
+  }
+
+  if (configured === "false" || configured === "0") {
+    return false;
+  }
+
+  return Boolean(process.env["VERCEL"]);
+}
+
 export function providerConfigured(): boolean {
   return (
     Boolean(
       process.env["DOWNLOAD_API_URL"],
     ) ||
-    localDownloaderEnabled()
+    localDownloaderEnabled() ||
+    downloadProxyEnabled()
+  );
+}
+
+function isMediaResponse(res: Response): boolean {
+  const contentType = (
+    res.headers.get("content-type") ?? ""
+  )
+    .trim()
+    .toLowerCase();
+
+  // An empty content type is tolerated; HTML/JSON error pages are not.
+  return (
+    !contentType ||
+    contentType.startsWith("audio/") ||
+    contentType.startsWith("video/") ||
+    contentType.startsWith(
+      "application/octet-stream",
+    ) ||
+    contentType.startsWith(
+      "binary/octet-stream",
+    )
   );
 }
 
@@ -477,6 +521,11 @@ async function fetchDownloader(
             : `https://${normalizedBase}`,
         );
 
+    // The long-running downloader accepts the id as a query parameter.
+    if (!useVercelRewrite) {
+      url.searchParams.set("id", videoId);
+    }
+
     url.searchParams.set(
       "type",
       type,
@@ -485,7 +534,10 @@ async function fetchDownloader(
     const res =
       await fetch(url, {
         headers: {
-          accept: "*/*",
+          accept: "audio/*,video/*,application/octet-stream",
+          // Prevents a rewrite that is missing from looping back into this
+          // same route forever.
+          "x-aurora-proxy": "1",
           ...(key
             ? { "x-api-key": key }
             : {}),
@@ -495,7 +547,8 @@ async function fetchDownloader(
 
     if (
       res.ok &&
-      res.body
+      res.body &&
+      isMediaResponse(res)
     ) {
       return res;
     }
@@ -524,9 +577,14 @@ type FetchMediaOptions = {
   /**
    * The public app origin. On Vercel this lets the frontend server function
    * reach the separate `/api/download` container through the configured
-   * rewrite instead of falling back to an unrelated public mirror.
+   * rewrite.
    */
   downloaderOrigin?: string;
+  /**
+   * Set to false when the current request itself arrived through the origin
+   * proxy. That prevents an infinite loop when no rewrite exists.
+   */
+  allowOriginProxy?: boolean;
 };
 
 const PIPED_INSTANCES = [
@@ -661,7 +719,11 @@ export async function fetchMedia(
     return local;
   }
 
-  if (options.downloaderOrigin) {
+  if (
+    options.downloaderOrigin &&
+    options.allowOriginProxy !== false &&
+    downloadProxyEnabled()
+  ) {
     const deployed = await fetchDownloader(
       options.downloaderOrigin,
       videoId,

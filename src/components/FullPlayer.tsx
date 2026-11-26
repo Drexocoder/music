@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { usePlayer } from "@/lib/player-store";
 import { fetchLyrics } from "@/lib/lyrics.functions";
 import { Visualizer } from "./Visualizer";
+import { DownloadButton } from "./DownloadButton";
 
 export function FullPlayer() {
   const p = usePlayer();
@@ -54,6 +55,15 @@ export function FullPlayer() {
               />
               <h1 className="mt-6 text-2xl font-bold leading-tight">{t.title}</h1>
               <p className="mt-1 text-sm text-muted-foreground">{t.channel}</p>
+
+              <div className="mt-4">
+                <DownloadButton
+                  track={t}
+                  label="Download MP3 / MP4"
+                  className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
+                />
+              </div>
+
               <div className="mt-6">
                 <Visualizer active={p.isPlaying} />
               </div>

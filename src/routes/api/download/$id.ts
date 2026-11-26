@@ -1,5 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+const FORMAT_EXTENSION = {
+  audio: "mp3",
+  video: "mp4",
+} as const;
+
+const FORMAT_CONTENT_TYPE = {
+  audio: "audio/mpeg",
+  video: "video/mp4",
+} as const;
+
 export const Route = createFileRoute("/api/download/$id")({
   server: {
     handlers: {
@@ -10,7 +20,6 @@ export const Route = createFileRoute("/api/download/$id")({
           ytMeta,
           safeFileName,
         } = await import("@/lib/media.server");
-
 
         const videoId = extractVideoId(params.id);
 
@@ -23,14 +32,33 @@ export const Route = createFileRoute("/api/download/$id")({
 
         const requestUrl = new URL(request.url);
 
+        const requestedFormat =
+          requestUrl.searchParams.get("type") ??
+          requestUrl.searchParams.get("format");
+
         const type =
-          requestUrl.searchParams.get("type") === "video"
+          requestedFormat === "video" ||
+          requestedFormat === "mp4"
             ? "video"
             : "audio";
 
+        // If this request already came from the origin proxy, the
+        // downloader service is not reachable. Return immediately instead of
+        // calling ourselves again in a loop.
+        if (request.headers.get("x-aurora-proxy") === "1") {
+          return Response.json(
+            {
+              error:
+                "The download service is not reachable. Deploy the downloader container (vercel.json) or set DOWNLOAD_API_URL.",
+            },
+            { status: 502 },
+          );
+        }
+
         try {
           const upstream = await fetchMedia(videoId, type, {
-            downloaderOrigin: new URL(request.url).origin,
+            downloaderOrigin: requestUrl.origin,
+            allowOriginProxy: true,
           });
 
           if (!upstream || !upstream.ok || !upstream.body) {
@@ -40,21 +68,28 @@ export const Route = createFileRoute("/api/download/$id")({
               if (!upstream) {
                 throw new Error("Downloader unavailable");
               }
-              const json = (await upstream.json()) as {
-                error?: string;
-                details?: string;
-              };
 
-              details =
-                json.details ??
-                json.error ??
-                details;
+              const body = await upstream.text();
+
+              try {
+                const json = JSON.parse(body) as {
+                  error?: string;
+                  details?: string;
+                };
+
+                details =
+                  json.details ??
+                  json.error ??
+                  details;
+              } catch {
+                details = body.slice(0, 500) || details;
+              }
             } catch {
               // Ignore invalid error response.
             }
 
             console.error(
-              "[media] Python downloader failed:",
+              "[media] Downloader failed:",
               upstream?.status ?? 502,
               details,
             );
@@ -74,28 +109,33 @@ export const Route = createFileRoute("/api/download/$id")({
 
           const meta = await ytMeta(videoId);
 
-          const ext =
-            type === "video"
-              ? "mp4"
-              : "mp3";
-
+          const ext = FORMAT_EXTENSION[type];
           const filename = safeFileName(
             meta?.title ?? videoId,
             ext,
           );
 
+          const upstreamContentType = (
+            upstream.headers.get("content-type") ?? ""
+          )
+            .trim()
+            .toLowerCase();
+
           const headers = new Headers();
 
           headers.set(
             "content-type",
-            type === "video"
-              ? "video/mp4"
-              : "audio/mpeg",
+            upstreamContentType.startsWith("audio/") ||
+              upstreamContentType.startsWith("video/")
+              ? upstreamContentType
+              : FORMAT_CONTENT_TYPE[type],
           );
 
           headers.set(
             "content-disposition",
-            `attachment; filename="${filename}"`,
+            `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(
+              filename,
+            )}`,
           );
 
           const contentLength =
@@ -115,6 +155,8 @@ export const Route = createFileRoute("/api/download/$id")({
             "no-store, no-cache, must-revalidate",
           );
 
+          headers.set("x-aurora-format", ext);
+
           return new Response(
             upstream.body,
             {
@@ -124,7 +166,7 @@ export const Route = createFileRoute("/api/download/$id")({
           );
         } catch (error) {
           console.error(
-            "[media] Python downloader request failed:",
+            "[media] Downloader request failed:",
             error,
           );
 
